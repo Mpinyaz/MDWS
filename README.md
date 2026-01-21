@@ -106,14 +106,14 @@ curl http://localhost:8080/health
 func main() {
     ws := NewManager()
     ws.setupEventHandlers()
-    
+
     // Add custom handler
     ws.RegisterHandler("custom_event", func(c *Client, event Event) error {
         log.Printf("Custom event from %s", c.id)
         // Your logic here
         return nil
     })
-    
+
     go ws.Run()
     // ... rest of setup
 }

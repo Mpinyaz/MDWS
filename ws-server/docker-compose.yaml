@@ -1,0 +1,194 @@
+services:
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: ${REDIS_NODE_1_HOST}
+    hostname: ${REDIS_NODE_1_HOST}
+    command: >
+      redis-server
+      --port ${REDIS_NODE_1_PORT}
+      --bind ${REDIS_BIND_ADDRESS}
+      --protected-mode ${REDIS_PROTECTED_MODE}
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout ${REDIS_CLUSTER_TIMEOUT}
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      ${REDIS_PASSWORD:+--requirepass} ${REDIS_PASSWORD}
+      ${REDIS_PASSWORD:+--masterauth} ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_NODE_1_PORT}:${REDIS_NODE_1_PORT}"
+      - "1${REDIS_NODE_1_PORT}:1${REDIS_NODE_1_PORT}"
+    volumes:
+      - redis-data-1:/data
+    networks:
+      - redis-cluster
+    restart: unless-stopped
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: ${REDIS_NODE_2_HOST}
+    hostname: ${REDIS_NODE_2_HOST}
+    command: >
+      redis-server
+      --port ${REDIS_NODE_2_PORT}
+      --bind ${REDIS_BIND_ADDRESS}
+      --protected-mode ${REDIS_PROTECTED_MODE}
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout ${REDIS_CLUSTER_TIMEOUT}
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      ${REDIS_PASSWORD:+--requirepass} ${REDIS_PASSWORD}
+      ${REDIS_PASSWORD:+--masterauth} ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_NODE_2_PORT}:${REDIS_NODE_2_PORT}"
+      - "1${REDIS_NODE_2_PORT}:1${REDIS_NODE_2_PORT}"
+    volumes:
+      - redis-data-2:/data
+    networks:
+      - redis-cluster
+    restart: unless-stopped
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: ${REDIS_NODE_3_HOST}
+    hostname: ${REDIS_NODE_3_HOST}
+    command: >
+      redis-server
+      --port ${REDIS_NODE_3_PORT}
+      --bind ${REDIS_BIND_ADDRESS}
+      --protected-mode ${REDIS_PROTECTED_MODE}
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout ${REDIS_CLUSTER_TIMEOUT}
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      ${REDIS_PASSWORD:+--requirepass} ${REDIS_PASSWORD}
+      ${REDIS_PASSWORD:+--masterauth} ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_NODE_3_PORT}:${REDIS_NODE_3_PORT}"
+      - "1${REDIS_NODE_3_PORT}:1${REDIS_NODE_3_PORT}"
+    volumes:
+      - redis-data-3:/data
+    networks:
+      - redis-cluster
+    restart: unless-stopped
+
+  redis-node-4:
+    image: redis:7-alpine
+    container_name: ${REDIS_NODE_4_HOST}
+    hostname: ${REDIS_NODE_4_HOST}
+    command: >
+      redis-server
+      --port ${REDIS_NODE_4_PORT}
+      --bind ${REDIS_BIND_ADDRESS}
+      --protected-mode ${REDIS_PROTECTED_MODE}
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout ${REDIS_CLUSTER_TIMEOUT}
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      ${REDIS_PASSWORD:+--requirepass} ${REDIS_PASSWORD}
+      ${REDIS_PASSWORD:+--masterauth} ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_NODE_4_PORT}:${REDIS_NODE_4_PORT}"
+      - "1${REDIS_NODE_4_PORT}:1${REDIS_NODE_4_PORT}"
+    volumes:
+      - redis-data-4:/data
+    networks:
+      - redis-cluster
+    restart: unless-stopped
+
+  redis-node-5:
+    image: redis:7-alpine
+    container_name: ${REDIS_NODE_5_HOST}
+    hostname: ${REDIS_NODE_5_HOST}
+    command: >
+      redis-server
+      --port ${REDIS_NODE_5_PORT}
+      --bind ${REDIS_BIND_ADDRESS}
+      --protected-mode ${REDIS_PROTECTED_MODE}
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout ${REDIS_CLUSTER_TIMEOUT}
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      ${REDIS_PASSWORD:+--requirepass} ${REDIS_PASSWORD}
+      ${REDIS_PASSWORD:+--masterauth} ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_NODE_5_PORT}:${REDIS_NODE_5_PORT}"
+      - "1${REDIS_NODE_5_PORT}:1${REDIS_NODE_5_PORT}"
+    volumes:
+      - redis-data-5:/data
+    networks:
+      - redis-cluster
+    restart: unless-stopped
+
+  redis-node-6:
+    image: redis:7-alpine
+    container_name: ${REDIS_NODE_6_HOST}
+    hostname: ${REDIS_NODE_6_HOST}
+    command: >
+      redis-server
+      --port ${REDIS_NODE_6_PORT}
+      --bind ${REDIS_BIND_ADDRESS}
+      --protected-mode ${REDIS_PROTECTED_MODE}
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout ${REDIS_CLUSTER_TIMEOUT}
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      ${REDIS_PASSWORD:+--requirepass} ${REDIS_PASSWORD}
+      ${REDIS_PASSWORD:+--masterauth} ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_NODE_6_PORT}:${REDIS_NODE_6_PORT}"
+      - "1${REDIS_NODE_6_PORT}:1${REDIS_NODE_6_PORT}"
+    volumes:
+      - redis-data-6:/data
+    networks:
+      - redis-cluster
+    restart: unless-stopped
+
+  cluster-creator:
+    image: redis:7-alpine
+    container_name: redis-cluster-creator
+    command: >
+      sh -c "sleep 10 &&
+             redis-cli --cluster create
+             ${REDIS_NODE_1_HOST}:${REDIS_NODE_1_PORT}
+             ${REDIS_NODE_2_HOST}:${REDIS_NODE_2_PORT}
+             ${REDIS_NODE_3_HOST}:${REDIS_NODE_3_PORT}
+             ${REDIS_NODE_4_HOST}:${REDIS_NODE_4_PORT}
+             ${REDIS_NODE_5_HOST}:${REDIS_NODE_5_PORT}
+             ${REDIS_NODE_6_HOST}:${REDIS_NODE_6_PORT}
+             --cluster-replicas ${REDIS_CLUSTER_REPLICAS}
+             ${REDIS_PASSWORD:+-a} ${REDIS_PASSWORD}
+             --cluster-yes"
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    networks:
+      - redis-cluster
+    restart: "no"
+
+volumes:
+  redis-data-1:
+  redis-data-2:
+  redis-data-3:
+  redis-data-4:
+  redis-data-5:
+  redis-data-6:
+
+networks:
+  redis-cluster:
+    driver: bridge
