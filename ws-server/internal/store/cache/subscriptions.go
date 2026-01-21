@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"websockets/internal/models"
+	. "websockets/internal/models"
 
-	"github.com/go-redis/redis"
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
 
@@ -18,11 +18,11 @@ func NewClientStore(rdb *RedisStore) *ClientStore {
 	return &ClientStore{rdb: rdb}
 }
 
-func clientKey(clientID string, asset models.AssetClass) string {
+func clientKey(clientID string, asset AssetClass) string {
 	return fmt.Sprintf("client:{%s}:%s", clientID, asset.String())
 }
 
-func symbolKey(asset models.AssetClass, symbol string) string {
+func symbolKey(asset AssetClass, symbol string) string {
 	return fmt.Sprintf("symbol:{%s}:%s", asset.String(), symbol)
 }
 
@@ -37,7 +37,7 @@ func toInterfaceSlice(ss []string) []interface{} {
 func (c *ClientStore) addClientToSymbols(
 	ctx context.Context,
 	clientID string,
-	asset models.AssetClass,
+	asset AssetClass,
 	symbols []string,
 ) error {
 	if len(symbols) == 0 {
@@ -57,7 +57,7 @@ func (c *ClientStore) addClientToSymbols(
 func (c *ClientStore) removeClientFromSymbols(
 	ctx context.Context,
 	clientID string,
-	asset models.AssetClass,
+	asset AssetClass,
 	symbols []string,
 ) error {
 	if len(symbols) == 0 {
@@ -78,7 +78,7 @@ func (c *ClientStore) SetClientSubs(sub ClientSub) error {
 	ctx := context.Background()
 	clientID := sub.ID.String()
 
-	process := func(asset models.AssetClass, newSymbols *[]string) error {
+	process := func(asset AssetClass, newSymbols *[]string) error {
 		if newSymbols == nil {
 			return nil
 		}
@@ -108,30 +108,30 @@ func (c *ClientStore) SetClientSubs(sub ClientSub) error {
 		return nil
 	}
 
-	if err := process(models.Forex, sub.Forex); err != nil {
+	if err := process(Forex, sub.Forex); err != nil {
 		return err
 	}
-	if err := process(models.Equity, sub.Equity); err != nil {
+	if err := process(Equity, sub.Equity); err != nil {
 		return err
 	}
-	if err := process(models.Crypto, sub.Crypto); err != nil {
+	if err := process(Crypto, sub.Crypto); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *ClientStore) PatchClientSub(asset models.AssetClass, sub ClientSub) error {
+func (c *ClientStore) PatchClientSub(asset AssetClass, sub ClientSub) error {
 	ctx := context.Background()
 	clientID := sub.ID.String()
 
 	var symbols *[]string
 	switch asset {
-	case models.Forex:
+	case Forex:
 		symbols = sub.Forex
-	case models.Equity:
+	case Equity:
 		symbols = sub.Equity
-	case models.Crypto:
+	case Crypto:
 		symbols = sub.Crypto
 	}
 
@@ -152,10 +152,10 @@ func (c *ClientStore) RemoveClientSubs(clientID uuid.UUID) error {
 	ctx := context.Background()
 	id := clientID.String()
 
-	assets := []models.AssetClass{
-		models.Forex,
-		models.Equity,
-		models.Crypto,
+	assets := []AssetClass{
+		Forex,
+		Equity,
+		Crypto,
 	}
 
 	_, err := c.rdb.Client.Pipelined(ctx, func(p redis.Pipeliner) error {
@@ -181,7 +181,7 @@ func (c *ClientStore) RemoveClientSubs(clientID uuid.UUID) error {
 
 func (c *ClientStore) RemoveClientSubsByAsset(
 	clientID uuid.UUID,
-	asset models.AssetClass,
+	asset AssetClass,
 ) error {
 	ctx := context.Background()
 	id := clientID.String()

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	. "websockets/internal/core"
 	"websockets/utils"
@@ -28,15 +27,6 @@ func main() {
 	manager.RegisterHandler("forex_unsubscribe", HandleForexUnsubscribeREST)
 
 	go manager.Run()
-
-	// Initialize Forex REST API poller (polls every 5 seconds)
-	if tiingoAPIKey != "" {
-		if err := InitForexPoller(tiingoAPIKey, manager, 5*time.Second); err != nil {
-			log.Printf("Failed to initialize Forex poller: %v", err)
-		} else {
-			forexPoller.Start()
-		}
-	}
 
 	// HTTP handlers
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

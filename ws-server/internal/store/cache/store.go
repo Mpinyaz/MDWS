@@ -1,3 +1,9 @@
+// Package cache provides Redis-backed storage for websocket client subscriptions.
+//
+// It supports:
+//   - Client → symbols lookups
+//   - Symbol → clients lookups
+//   - Redis Cluster-safe key layouts
 package cache
 
 import (

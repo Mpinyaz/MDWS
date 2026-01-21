@@ -9,16 +9,14 @@ import (
 	"github.com/google/uuid"
 )
 
-type (
-	HealthResponse struct {
-		Status           string `json:"status,omitempty"`
-		ConnectedClients int    `json:"connected_clients,omitempty"`
-		Uptime           string `json:"uptime,omitempty"`
-		Timestamp        string `json:"timestamp,omitempty"`
-	}
-)
-
 var startTime = time.Now()
+
+type HealthResponse struct {
+	Status           string `json:"status,omitempty"`
+	ConnectedClients int    `json:"connected_clients,omitempty"`
+	Uptime           string `json:"uptime,omitempty"`
+	Timestamp        string `json:"timestamp,omitempty"`
+}
 
 func HandleBroadcast(c *Client, event Event) error {
 	log.Printf("Broadcasting message from %s: %s", c.ID, event.Payload)
@@ -39,48 +37,49 @@ func HandlePing(c *Client, event Event) error {
 	return nil
 }
 
-func healthCheckHandler(hub *Manager) http.HandlerFunc {
+// HealthCheckHandler exposes server health and websocket stats
+func HealthCheckHandler(hub *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		uptime := time.Since(startTime)
+
 		hub.Mu.RLock()
-		count := len(hub.Clients)
+		clientCount := len(hub.Clients)
 		hub.Mu.RUnlock()
 
-		response := HealthResponse{
+		resp := HealthResponse{
 			Status:           "ok",
-			ConnectedClients: count,
+			ConnectedClients: clientCount,
 			Uptime:           uptime.String(),
 			Timestamp:        time.Now().Format(time.RFC3339),
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
 
-// ServeWS handles websocket requests from clients
+// ServeWS upgrades HTTP connections to WebSocket connections
 func ServeWS(hub *Manager, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Upgrade failed: %v", err)
+		log.Printf("WebSocket upgrade failed: %v", err)
 		return
 	}
-
-	clientID := uuid.New()
 
 	client := &Client{
 		Mgmt: hub,
 		Conn: conn,
 		Send: make(chan *Event, 256),
-		ID:   clientID,
+		ID:   uuid.New(),
 		Done: make(chan struct{}),
 	}
 
-	client.Mgmt.Register <- client
+	// Register client with manager
+	hub.Register <- client
 
-	// Start read and write pumps in separate goroutines
+	// Start pumps
 	go client.writePump()
 	go client.readPump()
 }
