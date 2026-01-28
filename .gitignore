@@ -1,0 +1,15 @@
+node_modules
+.DS_Store
+dist
+dist-ssr
+*.local
+count.txt
+.env
+.nitro
+.tanstack
+.wrangler
+market_data_ws_architecture.md
+mdworkers/target
+mdworkers/target
+mdworkers/target
+ws-server/mdws
