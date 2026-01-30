@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
-
+use tokio_tungstenite::tungstenite::protocol::Message;
+use tracing::error;
 /// Generic subscribe request for WebSocket feeds
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +89,7 @@ pub struct MarketData {
 pub enum MsgError {
     ReadError(String),
     SendError(String),
+    ParseError(String),
 }
 
 impl Error for MsgError {}
@@ -97,6 +99,7 @@ impl fmt::Display for MsgError {
         match self {
             Self::ReadError(e) => write!(f, "Error reading message: {}", e),
             Self::SendError(e) => write!(f, "Error sending message: {}", e),
+            Self::ParseError(e) => write!(f, "Error parsing message: {}", e),
         }
     }
 }
@@ -104,5 +107,22 @@ impl fmt::Display for MsgError {
 impl fmt::Debug for MsgError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self)
+    }
+}
+
+pub fn deserialize_msg(msg: Message) -> Result<WsResponse, MsgError> {
+    if let Message::Text(text) = msg {
+        match serde_json::from_str::<WsResponse>(&text) {
+            Ok(data) => Ok(data),
+            Err(e) => {
+                error!("Failed to deserialize message: {}", e);
+                Err(MsgError::ParseError(format!(
+                    "Deserialization error: {}",
+                    e
+                )))
+            }
+        }
+    } else {
+        Err(MsgError::ParseError("Expected text message".to_string()))
     }
 }

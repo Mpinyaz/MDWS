@@ -9,7 +9,7 @@ readme = "./README.md"
 keywords = ["rabbitmq", "websockets"]
 
 [dependencies]
-tokio-tungstenite = "0.28.0"
+tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 tokio = { version = "1.47.1", features = ["full"] }
 reqwest = { version = "0.13.1", features = ["json"] }
 serde_json = "1.0.145"
