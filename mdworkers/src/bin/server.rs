@@ -40,25 +40,44 @@ pub async fn main() -> Result<()> {
     };
 
     tokio::spawn(async move {
-        if let Err(e) = outbound_msg_handler(forex_client, AssetClass::Forex, deserialize_msg).await
+        match outbound_msg_handler(
+            forex_client,
+            AssetClass::Forex,
+            cfg.forex_tickers,
+            deserialize_msg,
+        )
+        .await
         {
-            error!("Forex handler crashed: {}", e);
+            Ok(_) => info!("Forex handler completed"),
+            Err(e) => error!("Forex handler crashed: {}", e),
         }
     });
 
     tokio::spawn(async move {
-        if let Err(e) =
-            outbound_msg_handler(crypto_client, AssetClass::Crypto, deserialize_msg).await
+        match outbound_msg_handler(
+            crypto_client,
+            AssetClass::Crypto,
+            cfg.crypto_tickers,
+            deserialize_msg,
+        )
+        .await
         {
-            error!("Crypto handler crashed: {}", e);
+            Ok(_) => info!("Crypto handler completed"),
+            Err(e) => error!("Crypto handler crashed: {}", e),
         }
     });
 
     tokio::spawn(async move {
-        if let Err(e) =
-            outbound_msg_handler(equity_client, AssetClass::Equity, deserialize_msg).await
+        match outbound_msg_handler(
+            equity_client,
+            AssetClass::Equity,
+            cfg.equity_tickers,
+            deserialize_msg,
+        )
+        .await
         {
-            error!("Equity handler crashed: {}", e);
+            Ok(_) => info!("Equity handler completed"),
+            Err(e) => error!("Equity handler crashed: {}", e),
         }
     });
 

@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::error::Error;
 use std::fmt;
 use tokio_tungstenite::tungstenite::protocol::Message;
-use tracing::error;
+
 /// Generic subscribe request for WebSocket feeds
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -111,18 +111,18 @@ impl fmt::Debug for MsgError {
 }
 
 pub fn deserialize_msg(msg: Message) -> Result<WsResponse, MsgError> {
-    if let Message::Text(text) = msg {
-        match serde_json::from_str::<WsResponse>(&text) {
-            Ok(data) => Ok(data),
-            Err(e) => {
-                error!("Failed to deserialize message: {}", e);
-                Err(MsgError::ParseError(format!(
-                    "Deserialization error: {}",
-                    e
-                )))
-            }
+    match msg {
+        Message::Text(text) => serde_json::from_str::<WsResponse>(&text)
+            .map_err(|e| MsgError::ParseError(format!("JSON parse error: {}", e))),
+        Message::Binary(data) => {
+            let text = String::from_utf8(data.to_vec())
+                .map_err(|e| MsgError::ParseError(format!("Binary to UTF-8 error: {}", e)))?;
+
+            serde_json::from_str::<WsResponse>(&text)
+                .map_err(|e| MsgError::ParseError(format!("JSON parse error: {}", e)))
         }
-    } else {
-        Err(MsgError::ParseError("Expected text message".to_string()))
+        _ => Err(MsgError::ParseError(
+            "Expected text or binary message".to_string(),
+        )),
     }
 }
