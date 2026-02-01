@@ -41,7 +41,7 @@ impl Error for ClientError {}
 
 impl Client {
     async fn connect(cfg: &Config, ac: AssetClass) -> Result<WsStream, ClientError> {
-        let url = format!("{}/{}", cfg.url, ac);
+        let url = format!("{}/{}", cfg.data_url, ac);
         info!("Connecting to WebSocket at: {}", url);
 
         let (ws_stream, response) = connect_async(&url)
@@ -85,7 +85,7 @@ impl Client {
         };
 
         Ok(Client {
-            api_key: cfg.api_key.clone(),
+            api_key: cfg.data_api_key.clone(),
             fx_ws,
             crypto_ws,
             equity_ws,

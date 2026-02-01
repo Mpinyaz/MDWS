@@ -8,8 +8,12 @@ description = "Rabbit MQ consumer that streams market data from web sockets"
 readme = "./README.md"
 keywords = ["rabbitmq", "websockets"]
 
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+
 [dependencies]
-tokio-tungstenite = "0.28.0"
+tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 tokio = { version = "1.47.1", features = ["full"] }
 reqwest = { version = "0.13.1", features = ["json"] }
 serde_json = "1.0.145"
@@ -22,3 +26,12 @@ tracing-subscriber = "*"
 dotenv = "0.15.0"
 anyhow = "1.0.100"
 dotenvy = "0.15.7"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
