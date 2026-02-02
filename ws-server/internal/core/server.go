@@ -81,8 +81,8 @@ func (m *Manager) setupEventHandlers() {
 	m.Handlers["subscribe"] = m.HandleSubscribe
 	m.Handlers["unsubscribe"] = m.HandleUnsubscribe
 	m.Handlers["patch_subscribe"] = m.HandlePatchSubscribe
-	m.Handlers["forex_subscribe"] = HandleForexSubscribe
-	m.Handlers["forex_unsubscribe"] = HandleForexUnsubscribe
+	// m.Handlers["forex_subscribe"] = HandleForexSubscribe
+	// m.Handlers["forex_unsubscribe"] = HandleForexUnsubscribe
 }
 
 func (m *Manager) RegisterHandler(eventType string, handler EventHandler) {
