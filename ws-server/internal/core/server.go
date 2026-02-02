@@ -58,12 +58,29 @@ type Client struct {
 
 type EventHandler func(c *Client, event Event) error
 
+func (m *Manager) CreateClient(conn *websocket.Conn) *Client {
+	client := &Client{
+		Mgmt: m,
+		Conn: conn,
+		Send: make(chan *Event, 256), // buffered to prevent blocking
+		ID:   m.idNode.Generate(),
+		Done: make(chan struct{}),
+	}
+
+	m.Register <- client
+
+	go client.writePump()
+	go client.readPump()
+
+	return client
+}
+
 func NewManager(cfg *utils.Config, clientStore *cache.ClientStore) *Manager {
 	node, _ := snowflake.NewNode(cfg.SfnodeID)
 
 	m := &Manager{
 		Clients:       make(map[*Client]bool),
-		Broadcast:     make(chan *Event, 256),
+		Broadcast:     make(chan *Event, 1000),
 		Register:      make(chan *Client),
 		Unregister:    make(chan *Client),
 		Handlers:      make(map[string]EventHandler),
@@ -95,6 +112,28 @@ func (m *Manager) NumClients() int {
 	return len(m.Clients)
 }
 
+func (m *Manager) removeClientNow(c *Client, reason string) {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+
+	if _, ok := m.Clients[c]; !ok {
+		return // Already removed
+	}
+
+	delete(m.Clients, c)
+	close(c.Done)
+	close(c.Send)
+
+	// Remove subscriptions from Redis if configured
+	if m.clientStore != nil {
+		if err := m.clientStore.RemoveClientSubs(c.ID.Int64()); err != nil {
+			log.Printf("Failed to remove client %s from Redis: %v", c.ID, err)
+		}
+	}
+
+	log.Printf("Removing client %s: %s", c.ID, reason)
+}
+
 func (m *Manager) Run() {
 	for {
 		select {
@@ -105,59 +144,20 @@ func (m *Manager) Run() {
 			log.Printf("Client %s registered. Total clients: %d", client.ID, m.NumClients())
 
 		case client := <-m.Unregister:
-			m.Mu.Lock()
-			if _, ok := m.Clients[client]; ok {
-				delete(m.Clients, client)
-				close(client.Done)
-				close(client.Send)
-
-				// Remove client subscriptions from Redis
-				if m.clientStore != nil {
-					if err := m.clientStore.RemoveClientSubs(client.ID.Int64()); err != nil {
-						log.Printf("Failed to remove client %s from Redis: %v", client.ID, err)
-					}
-				}
-
-				log.Printf("Client %s unregistered. Total clients: %d", client.ID, m.NumClients())
-			}
-			m.Mu.Unlock()
+			m.removeClientNow(client, "unregistered")
 
 		case message := <-m.Broadcast:
 			m.Mu.RLock()
-			clientsToRemove := []*Client{}
-
 			for client := range m.Clients {
 				select {
 				case client.Send <- message:
-					// Successfully sent
+					// Sent successfully
 				default:
-					// Channel full - mark for removal
-					clientsToRemove = append(clientsToRemove, client)
-					log.Printf("Client %s channel full, marking for removal", client.ID)
+					// Slow client, remove immediately
+					go m.removeClientNow(client, "slow consumption")
 				}
 			}
 			m.Mu.RUnlock()
-
-			// Remove slow clients outside of read lock
-			if len(clientsToRemove) > 0 {
-				m.Mu.Lock()
-				for _, client := range clientsToRemove {
-					if _, ok := m.Clients[client]; ok {
-						delete(m.Clients, client)
-						close(client.Done)
-						close(client.Send)
-
-						if m.clientStore != nil {
-							if err := m.clientStore.RemoveClientSubs(client.ID.Int64()); err != nil {
-								log.Printf("Failed to remove slow client %s from Redis: %v", client.ID, err)
-							}
-						}
-
-						log.Printf("Client %s removed due to slow consumption", client.ID)
-					}
-				}
-				m.Mu.Unlock()
-			}
 		}
 	}
 }
@@ -343,13 +343,16 @@ func (m *Manager) HandleUnsubscribe(c *Client, event Event) error {
 
 func (c *Client) readPump() {
 	defer func() {
+		// Unregister the client from the manager
 		c.Mgmt.Unregister <- c
+		// Close the websocket connection
 		c.Conn.Close()
 	}()
 
 	c.Conn.SetReadLimit(maxMessageSize)
 	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.Conn.SetPongHandler(func(string) error {
+	c.Conn.SetPongHandler(func(appData string) error {
+		// Reset read deadline on pong
 		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
@@ -358,22 +361,28 @@ func (c *Client) readPump() {
 		var event Event
 		err := c.Conn.ReadJSON(&event)
 		if err != nil {
+			// Only log unexpected close errors
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("Read error from client %s: %v", c.ID, err)
+			} else {
+				log.Printf("Client %s disconnected: %v", c.ID, err)
 			}
 			break
 		}
 
+		// Attach sender and timestamp
 		event.From = c.ID
 		event.Time = time.Now()
 		log.Printf("Received from %s: type=%s, payload=%s", c.ID, event.Type, string(event.Payload))
 
+		// Handle the event if a handler exists
 		if handler, ok := c.Mgmt.Handlers[event.Type]; ok {
 			if err := handler(c, event); err != nil {
 				log.Printf("Handler error for event type '%s': %v", event.Type, err)
 				c.sendError(err.Error())
 			}
 		} else {
+			// Unknown event type
 			log.Printf("Unknown event from %s: type=%s", c.ID, event.Type)
 			c.sendUnknownEvent(event.Type)
 		}
@@ -395,22 +404,21 @@ func (c *Client) writePump() {
 		case message, ok := <-c.Send:
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				// Channel closed; send close message
+				_ = c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
-			w, err := c.Conn.NextWriter(websocket.TextMessage)
-			if err != nil {
+			if err := c.Conn.WriteJSON(message); err != nil {
 				log.Printf("Write error to client %s: %v", c.ID, err)
 				return
 			}
-			json.NewEncoder(w).Encode(message)
-			w.Close()
 
 		case <-ticker.C:
+			// Send ping periodically to keep connection alive
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Println("ping error:", err)
+				log.Printf("Ping error to client %s: %v", c.ID, err)
 				return
 			}
 		}

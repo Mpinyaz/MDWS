@@ -243,7 +243,7 @@ func handleMktUpdate(
 		case streams.manager.Broadcast <- &event:
 			// Successfully sent
 		case <-time.After(100 * time.Millisecond):
-			log.Println("⚠️ Broadcast channel timeout, dropping market update")
+			// log.Println("⚠️ Broadcast channel timeout, dropping market update")
 		case <-streams.ctx.Done():
 			return
 		}
