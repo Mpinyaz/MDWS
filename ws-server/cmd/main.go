@@ -13,45 +13,39 @@ import (
 )
 
 func main() {
-	// Load configuration
 	cfg, err := utils.LoadEnv()
 	if err != nil {
 		log.Fatal("Failed to load config:", err)
 	}
 
-	// Initialize Redis client
 	redisStore, err := cache.NewRedisClient(cfg)
 	if err != nil {
-		log.Printf("Warning: Redis connection failed: %v. Running without persistence.", err)
+		log.Printf(" Redis unavailable: %v (running stateless)", err)
 		redisStore = nil
 	} else {
 		redisStore.Run()
 		defer redisStore.Close()
 	}
 
-	// Initialize client store
 	var clientStore *cache.ClientStore
 	if redisStore != nil {
 		clientStore = cache.NewClientStore(redisStore)
 	}
 
-	// Create manager with Redis support
 	manager := NewManager(cfg, clientStore)
-
-	// Initialize Tiingo WebSocket client if API key is available
-	tiingoAPIKey := cfg.TiingoAPIKey
-	if tiingoAPIKey != "" {
-		if err := InitTiingoClient(tiingoAPIKey, manager); err != nil {
-			log.Printf("Failed to initialize Tiingo: %v", err)
-		} else {
-			log.Println("✅ Tiingo WebSocket client initialized")
-		}
-	} else {
-		log.Println("Warning: TIINGO_API_KEY not set. Tiingo features disabled.")
-	}
-
 	go manager.Run()
-	// HTTP handlers
+
+	// ------------------------------------------------------------
+	// RabbitMQ Streams (market updates + subs)
+	// ------------------------------------------------------------
+	if _, err := InitMktStreams(manager); err != nil {
+		log.Fatalf("Failed to initialize RabbitMQ streams: %v", err)
+	}
+	log.Println("RabbitMQ market streams connected")
+
+	// ------------------------------------------------------------
+	// HTTP
+	// ------------------------------------------------------------
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ServeWS(manager, w, r)
 	})
@@ -61,75 +55,52 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		tiingoEnabled := "false"
-		if tiingoAPIKey != "" {
-			tiingoEnabled = "true"
-		}
+		redisEnabled := redisStore != nil
 
-		redisEnabled := "false"
-		if redisStore != nil {
-			redisEnabled = "true"
-		}
-
-		response := `{
-			"message": "WebSocket Real-time Data Server",
+		w.Write([]byte(`{
+			"message": "Market Data WebSocket Server",
 			"endpoints": {
 				"/ws": "WebSocket connection",
 				"/health": "Health check"
 			},
-			"supported_events": [
-				"broadcast",
-				"ping",
-				"subscribe",
-				"unsubscribe",
-				"patch_subscribe",
-				"forex_subscribe",
-				"forex_unsubscribe"
-			],
 			"features": {
-				"tiingo_websocket": ` + tiingoEnabled + `,
-				"redis_persistence": ` + redisEnabled + `
+				"rabbitmq_streams": true,
+				"redis_persistence": ` + boolToString(redisEnabled) + `
 			}
-		}`
-
-		w.Write([]byte(response))
+		}`))
 	})
 
-	// Get port from config
+	// ------------------------------------------------------------
+	// Server
+	// ------------------------------------------------------------
 	port := cfg.AppPort
 	if port == "" {
 		port = "8080"
 	}
 
-	// Start HTTP server
 	go func() {
-		log.Printf("🚀 WebSocket server starting on :%s", port)
-		log.Println("📊 Real-time forex data powered by Tiingo")
+		log.Printf("MDWS listening on :%s", port)
 		if err := http.ListenAndServe(":"+port, nil); err != nil {
-			log.Fatal("ListenAndServe: ", err)
+			log.Fatal(err)
 		}
 	}()
 
-	log.Println("✅ Server is ready. Press Ctrl+C to stop")
+	log.Println("✅ Server ready")
 
+	// ------------------------------------------------------------
 	// Graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
+	// ------------------------------------------------------------
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
 
-	log.Println("\n🛑 Shutting down gracefully...")
-
-	// Close Tiingo connection
-	if GetTiingoClient() != nil {
-		log.Println("Closing Tiingo connection...")
-		GetTiingoClient().Close()
-	}
-
-	// Close Redis connection
-	if redisStore != nil {
-		log.Println("Closing Redis connection...")
-		redisStore.Close()
-	}
-
+	log.Println("🛑 Shutting down gracefully")
 	log.Println("👋 Server stopped")
+}
+
+func boolToString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }

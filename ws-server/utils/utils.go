@@ -10,12 +10,16 @@ import (
 )
 
 type Config struct {
-	TiingoWSURL   string
-	TiingoAPIKey  string
-	RedisAddrs    []string
-	RedisPassword string
-	AppPort       string
-	SfnodeID      int64
+	RedisAddrs      []string
+	RedisPassword   string
+	AppPort         string
+	SfnodeID        int64
+	RmqHost         string
+	RmqUsername     string
+	RmqPassword     string
+	RmqMarketUpdate string
+	RmqMarketSubs   string
+	RmqPort         int
 }
 
 func LoadEnv() (*Config, error) {
@@ -25,7 +29,6 @@ func LoadEnv() (*Config, error) {
 	// Enable ENV variables
 	v.AutomaticEnv()
 
-	// Optional: allow ENV names like REDIS_PASSWORD
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	addrs := v.GetString("REDIS_ADDRS")
@@ -36,17 +39,26 @@ func LoadEnv() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid Node ID: %s", err)
 	}
+
+	rmqPort, err := strconv.ParseInt(v.GetString("RABBITMQ_STREAM_PORT"), 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Node ID: %s", err)
+	}
 	redisAddrs := strings.Split(addrs, ",")
 	for i := range redisAddrs {
 		redisAddrs[i] = strings.TrimSpace(redisAddrs[i])
 	}
 	cfg := &Config{
-		TiingoWSURL:   v.GetString("TIINGO_WS_URL"),
-		TiingoAPIKey:  v.GetString("TIINGO_API_KEY"),
-		RedisAddrs:    redisAddrs,
-		RedisPassword: v.GetString("REDIS_PASSWORD"),
-		AppPort:       v.GetString("APP_PORT"),
-		SfnodeID:      nodeID,
+		RedisAddrs:      redisAddrs,
+		RedisPassword:   v.GetString("REDIS_PASSWORD"),
+		AppPort:         v.GetString("APP_PORT"),
+		SfnodeID:        nodeID,
+		RmqHost:         v.GetString("RABBITMQ_ADVERTISED_HOST"),
+		RmqUsername:     v.GetString("RABBITMQ_DEFAULT_USER"),
+		RmqPassword:     v.GetString("RABBITMQ_DEFAULT_PASS"),
+		RmqMarketUpdate: v.GetString("MDWS_FEED_STREAM"),
+		RmqMarketSubs:   v.GetString("MDWS_SUBSCRIBE_STREAM"),
+		RmqPort:         int(rmqPort),
 	}
 
 	return cfg, nil
