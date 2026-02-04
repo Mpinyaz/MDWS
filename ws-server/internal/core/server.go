@@ -46,6 +46,7 @@ type Manager struct {
 	configuration *utils.Config
 	clientStore   *cache.ClientStore
 	idNode        *snowflake.Node
+	streams       *MdwsStreams
 }
 
 type Client struct {
@@ -87,19 +88,37 @@ func NewManager(cfg *utils.Config, clientStore *cache.ClientStore) *Manager {
 		configuration: cfg,
 		clientStore:   clientStore,
 		idNode:        node,
+		streams:       nil,
 	}
 	m.setupEventHandlers()
 	return m
 }
 
+func (m *Manager) SetStreams(streams *MdwsStreams) {
+	m.streams = streams
+}
+
 func (m *Manager) setupEventHandlers() {
 	m.Handlers["broadcast"] = HandleBroadcast
 	m.Handlers["ping"] = HandlePing
-	m.Handlers["subscribe"] = m.HandleSubscribe
-	m.Handlers["unsubscribe"] = m.HandleUnsubscribe
-	m.Handlers["patch_subscribe"] = m.HandlePatchSubscribe
-	// m.Handlers["forex_subscribe"] = HandleForexSubscribe
-	// m.Handlers["forex_unsubscribe"] = HandleForexUnsubscribe
+	m.Handlers["subscribe"] = func(c *Client, e Event) error {
+		if m.streams == nil {
+			return fmt.Errorf("streams not initialized")
+		}
+		return m.HandleSubscribe(c, e, m.streams)
+	}
+	m.Handlers["unsubscribe"] = func(c *Client, e Event) error {
+		if m.streams == nil {
+			return fmt.Errorf("streams not initialized")
+		}
+		return m.HandleUnsubscribe(c, e, m.streams)
+	}
+	m.Handlers["patch_subscribe"] = func(c *Client, e Event) error {
+		if m.streams == nil {
+			return fmt.Errorf("streams not initialized")
+		}
+		return m.HandlePatchSubscribe(c, e, m.streams)
+	}
 }
 
 func (m *Manager) RegisterHandler(eventType string, handler EventHandler) {
@@ -162,45 +181,76 @@ func (m *Manager) Run() {
 	}
 }
 
-// HandleSubscribe handles full subscription replacement
-func (m *Manager) HandleSubscribe(c *Client, event Event) error {
-	var payload struct {
-		Forex  *[]string `json:"forex,omitempty"`
-		Equity *[]string `json:"equity,omitempty"`
-		Crypto *[]string `json:"crypto,omitempty"`
-	}
+// HandleSubscribe handles adding to existing subscriptions
+func (m *Manager) HandleSubscribe(c *Client, event Event, conn *MdwsStreams) error {
+	var payload TiingoSubscribeData
 
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if len(payload.Tickers) == 0 || payload.AssetClass == "" {
+		return fmt.Errorf("asset and symbol is required")
+	}
+
+	var asset models.AssetClass
+	switch payload.AssetClass {
+	case "forex":
+		asset = models.Forex
+	case "equity":
+		asset = models.Equity
+	case "crypto":
+		asset = models.Crypto
+	default:
+		return fmt.Errorf("invalid asset type: %s", payload.AssetClass)
+	}
+
+	internalEvent := &Event{
+		Type:    "subscribe",
+		Payload: event.Payload,
+		Time:    time.Now(),
+		From:    c.ID,
+	}
+
+	if err := conn.PublishSubscription(internalEvent); err != nil {
+		log.Printf("Failed to publish subscription: %v", err)
 		return err
 	}
 
 	// Create subscription object
 	sub := models.ClientSub{
-		ID:     c.ID,
-		Forex:  payload.Forex,
-		Equity: payload.Equity,
-		Crypto: payload.Crypto,
+		ID: c.ID,
 	}
 
-	// Store in Redis (replaces existing subscriptions)
+	// Set the appropriate field
+	switch asset {
+	case models.Forex:
+		sub.Forex = &payload.Tickers
+	case models.Equity:
+		sub.Equity = &payload.Tickers
+	case models.Crypto:
+		sub.Crypto = &payload.Tickers
+	}
+
+	// Patch in Redis (adds to existing)
 	if m.clientStore != nil {
-		if err := m.clientStore.SetClientSubs(sub); err != nil {
+		if err := m.clientStore.PatchClientSub(asset, sub); err != nil {
 			return err
 		}
 	}
 
 	// Send acknowledgment
 	ackPayload, _ := json.Marshal(map[string]interface{}{
-		"status": "subscribed",
-		"forex":  payload.Forex,
-		"equity": payload.Equity,
-		"crypto": payload.Crypto,
+		"status":  "subscribed",
+		"asset":   payload.AssetClass,
+		"symbols": payload.Tickers,
 	})
 
 	ackEvent := &Event{
-		Type:    "subscribed",
+		Type:    "subscribe",
 		Payload: json.RawMessage(ackPayload),
 		Time:    time.Now(),
+		From:    c.ID,
 	}
 
 	select {
@@ -213,19 +263,19 @@ func (m *Manager) HandleSubscribe(c *Client, event Event) error {
 }
 
 // HandlePatchSubscribe handles adding to existing subscriptions
-func (m *Manager) HandlePatchSubscribe(c *Client, event Event) error {
-	var payload struct {
-		Asset   string   `json:"asset"` // "forex", "equity", or "crypto"
-		Symbols []string `json:"symbols"`
-	}
+func (m *Manager) HandlePatchSubscribe(c *Client, event Event, conn *MdwsStreams) error {
+	var payload TiingoSubscribeData
 
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		return err
+		return fmt.Errorf("invalid payload: %w", err)
 	}
 
-	// Determine asset class
+	if len(payload.Tickers) == 0 || payload.AssetClass == "" {
+		return fmt.Errorf("asset and symbol is required")
+	}
+
 	var asset models.AssetClass
-	switch payload.Asset {
+	switch payload.AssetClass {
 	case "forex":
 		asset = models.Forex
 	case "equity":
@@ -233,7 +283,19 @@ func (m *Manager) HandlePatchSubscribe(c *Client, event Event) error {
 	case "crypto":
 		asset = models.Crypto
 	default:
-		return fmt.Errorf("invalid asset type: %s", payload.Asset)
+		return fmt.Errorf("invalid asset type: %s", payload.AssetClass)
+	}
+
+	internalEvent := &Event{
+		Type:    "subscribe",
+		Payload: event.Payload,
+		Time:    time.Now(),
+		From:    c.ID,
+	}
+
+	if err := conn.PublishSubscription(internalEvent); err != nil {
+		log.Printf("Failed to publish subscription: %v", err)
+		return err
 	}
 
 	// Create subscription object
@@ -244,11 +306,11 @@ func (m *Manager) HandlePatchSubscribe(c *Client, event Event) error {
 	// Set the appropriate field
 	switch asset {
 	case models.Forex:
-		sub.Forex = &payload.Symbols
+		sub.Forex = &payload.Tickers
 	case models.Equity:
-		sub.Equity = &payload.Symbols
+		sub.Equity = &payload.Tickers
 	case models.Crypto:
-		sub.Crypto = &payload.Symbols
+		sub.Crypto = &payload.Tickers
 	}
 
 	// Patch in Redis (adds to existing)
@@ -261,12 +323,12 @@ func (m *Manager) HandlePatchSubscribe(c *Client, event Event) error {
 	// Send acknowledgment
 	ackPayload, _ := json.Marshal(map[string]interface{}{
 		"status":  "patched",
-		"asset":   payload.Asset,
-		"symbols": payload.Symbols,
+		"asset":   payload.AssetClass,
+		"symbols": payload.Tickers,
 	})
 
 	ackEvent := &Event{
-		Type:    "patch_subscribed",
+		Type:    "patch_subscribe",
 		Payload: json.RawMessage(ackPayload),
 		Time:    time.Now(),
 		From:    c.ID,
@@ -282,54 +344,75 @@ func (m *Manager) HandlePatchSubscribe(c *Client, event Event) error {
 }
 
 // HandleUnsubscribe handles unsubscribing from symbols
-func (m *Manager) HandleUnsubscribe(c *Client, event Event) error {
-	var payload struct {
-		Asset *string `json:"asset,omitempty"` // Optional: specific asset class
-	}
+
+func (m *Manager) HandleUnsubscribe(
+	c *Client,
+	event Event,
+	conn *MdwsStreams,
+) error {
+	var payload TiingoSubscribeData
 
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if payload.AssetClass == "" {
+		return fmt.Errorf("assetClass is required")
+	}
+
+	var asset models.AssetClass
+	switch payload.AssetClass {
+	case "forex":
+		asset = models.Forex
+	case "equity":
+		asset = models.Equity
+	case "crypto":
+		asset = models.Crypto
+	default:
+		return fmt.Errorf("invalid asset type: %s", payload.AssetClass)
+	}
+
+	// ------------------------------------------------------------
+	// Publish unsubscribe to RabbitMQ
+	// ------------------------------------------------------------
+	internalEvent := &Event{
+		Type:    "unsubscribe",
+		Payload: event.Payload,
+		Time:    time.Now(),
+		From:    c.ID,
+	}
+
+	if err := conn.PublishSubscription(internalEvent); err != nil {
+		log.Printf("Failed to publish unsubscribe: %v", err)
 		return err
 	}
 
-	var err error
-	if payload.Asset != nil {
-		// Unsubscribe from specific asset class
-		var asset models.AssetClass
-		switch *payload.Asset {
-		case "forex":
-			asset = models.Forex
-		case "equity":
-			asset = models.Equity
-		case "crypto":
-			asset = models.Crypto
-		default:
-			return fmt.Errorf("invalid asset type: %s", *payload.Asset)
-		}
-
-		if m.clientStore != nil {
-			err = m.clientStore.RemoveClientSubsByAsset(c.ID.Int64(), asset)
-		}
-	} else {
-		// Unsubscribe from all
-		if m.clientStore != nil {
-			err = m.clientStore.RemoveClientSubs(c.ID.Int64())
+	// ------------------------------------------------------------
+	// Update Redis (remove subscriptions)
+	// ------------------------------------------------------------
+	if m.clientStore != nil {
+		// Currently remove ALL symbols for that asset
+		if err := m.clientStore.RemoveClientSubsByAsset(
+			c.ID.Int64(),
+			asset,
+		); err != nil {
+			return err
 		}
 	}
 
-	if err != nil {
-		return err
-	}
-
-	// Send acknowledgment
+	// ------------------------------------------------------------
+	// ACK client
+	// ------------------------------------------------------------
 	ackPayload, _ := json.Marshal(map[string]interface{}{
 		"status": "unsubscribed",
-		"asset":  payload.Asset,
+		"asset":  payload.AssetClass,
 	})
 
 	ackEvent := &Event{
 		Type:    "unsubscribed",
 		Payload: json.RawMessage(ackPayload),
 		Time:    time.Now(),
+		From:    c.ID,
 	}
 
 	select {

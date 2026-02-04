@@ -4,6 +4,8 @@
 //   - Client → symbols lookups
 //   - Symbol → clients lookups
 //   - Works with standalone Redis or Redis Cluster (for dev or production)
+//
+// TODO: implement Redis cluster instance
 package cache
 
 import (
