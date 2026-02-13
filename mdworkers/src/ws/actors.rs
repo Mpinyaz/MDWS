@@ -181,7 +181,7 @@ async fn handle_ws_message(message: Message, asset_class: AssetClass) -> Result<
         Message::Text(text) => match serde_json::from_str::<WsResponse>(&text) {
             Ok(ws_response) => {
                 info!(
-                    "📨 Received {:?} message type: {}",
+                    "Received {:?} message type: {}",
                     asset_class, ws_response.message_type
                 );
 
@@ -192,13 +192,12 @@ async fn handle_ws_message(message: Message, asset_class: AssetClass) -> Result<
                 }
             }
             Err(e) => {
-                error!("⚠️ Parse error for {:?}: {}", asset_class, e);
+                error!("Parse error for {:?}: {}", asset_class, e);
             }
         },
         Message::Binary(data) => {
             let text = String::from_utf8(data.into())
                 .map_err(|e| MsgError::ParseError(format!("Binary to UTF-8 error: {}", e)))?;
-
             match serde_json::from_str::<WsResponse>(&text) {
                 Ok(ws_response) => {
                     if ws_response.message_type == "A" {
