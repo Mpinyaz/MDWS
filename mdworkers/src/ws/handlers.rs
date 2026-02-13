@@ -40,7 +40,7 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
         let msg = match delivery {
             Ok(m) => m,
             Err(e) => {
-                error!("❌ RabbitMQ consumer error: {}", e);
+                error!("RabbitMQ consumer error: {}", e);
                 continue;
             }
         };
@@ -48,7 +48,7 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
         let payload = match msg.message().data() {
             Some(d) => d,
             None => {
-                error!("⚠️ Empty subscription message received");
+                error!("Empty subscription message received");
                 continue;
             }
         };
@@ -56,7 +56,7 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
         let event: StreamSubEvent = match serde_json::from_slice(payload) {
             Ok(e) => e,
             Err(e) => {
-                error!("⚠️ Failed to parse subscription event: {}", e);
+                error!("Failed to parse subscription event: {}", e);
                 continue;
             }
         };
@@ -64,7 +64,7 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
         let asset = match parse_asset_class(&event.payload.asset_class) {
             Some(a) => a,
             None => {
-                error!("❌ Unknown asset class: {}", event.payload.asset_class);
+                error!("Unknown asset class: {}", event.payload.asset_class);
                 continue;
             }
         };
@@ -73,7 +73,7 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
         let tx = match channels.get_channel(asset) {
             Some(t) => t,
             None => {
-                error!("❌ No channel for {:?}", asset);
+                error!("No channel for {:?}", asset);
                 continue;
             }
         };
@@ -90,16 +90,16 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
             "subscribe" => WsCommand::Subscribe(sub_data),
             "unsubscribe" => WsCommand::Unsubscribe(sub_data),
             other => {
-                error!("❌ Unknown event type: {}", other);
+                error!("Unknown event type: {}", other);
                 continue;
             }
         };
 
         // Send command to actor via channel (non-blocking!)
         if let Err(e) = tx.send(cmd).await {
-            error!("❌ Failed to send command to {:?} actor: {}", asset, e);
+            error!("Failed to send command to {:?} actor: {}", asset, e);
         } else {
-            info!("✅ Sent {:?} command to {:?}", event.event_type, asset);
+            info!("Sent {:?} command to {:?}", event.event_type, asset);
         }
     }
 
