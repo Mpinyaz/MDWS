@@ -1,4 +1,43 @@
 services:
+  mdws-fe:
+    build:
+      context: ./mdws-fe
+      dockerfile: Dockerfile
+    container_name: mdws_fe
+    env_file:
+      - .env
+    ports:
+      - "3000:80"
+    depends_on:
+      websockets:
+        condition: service_started
+    restart: unless-stopped
+  mdwsworkers:
+    build:
+      context: ./mdworkers # build context is the ws-server folder
+      dockerfile: Dockerfile
+    container_name: mdws_workers
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+  websockets:
+    build:
+      context: ./ws-server # build context is the ws-server folder
+      dockerfile: Dockerfile
+    container_name: mdws_app
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
   redis:
     image: redis:8.2-alpine
     container_name: redis-standalone
