@@ -244,7 +244,7 @@ func (m *Manager) HandleSubscribe(c *Client, event Event, conn *MdwsStreams) err
 	ackPayload, _ := json.Marshal(map[string]interface{}{
 		"status":  "subscribed",
 		"asset":   payload.AssetClass,
-		"symbols": payload.Tickers,
+		"symbol": payload.Tickers,
 	})
 
 	ackEvent := &Event{

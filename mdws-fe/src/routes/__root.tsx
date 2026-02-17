@@ -3,6 +3,7 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import Navbar from '@components/Header/NavBar'
 import type { RouterContext } from '@/main'
+import { Toaster } from '@/components/ui/sonner'
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
@@ -22,6 +23,7 @@ function RootComponent() {
           },
         ]}
       />
+      <Toaster />
     </>
   )
 }

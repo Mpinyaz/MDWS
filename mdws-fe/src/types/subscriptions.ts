@@ -10,3 +10,9 @@ export interface SubscribePayload {
 export type UnsubscribePayload = SubscribePayload
 
 export type UnsubscribeEvent = WsEvent<UnsubscribePayload>
+
+export interface SubscribeResponse {
+  asset: AssetClass
+  status: string
+  symbol: Array<string>
+}
