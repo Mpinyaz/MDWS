@@ -1,7 +1,11 @@
+import { toast } from 'sonner'
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { SubscribeResponse } from '@/types/subscriptions'
+import type { WsEvent } from '@/types/event'
 import { useTickers } from '@/context'
 import { useMarketSocketContext } from '@/context/MktSocketCtx'
+import { useMarketSocket } from '@/hooks/useMarketWs'
 
 export const Route = createFileRoute('/subscriptions')({
   component: Subscriptions,
@@ -15,6 +19,8 @@ const predefinedTickers = {
 
 function Subscriptions() {
   const { tickers, setTickers } = useTickers()
+
+  const { lastEvent } = useMarketSocket()
   const { subscribe, unsubscribe } = useMarketSocketContext()
   const [selectedAssetClass, setSelectedAssetClass] =
     useState<keyof typeof predefinedTickers>('crypto')
@@ -52,6 +58,33 @@ function Subscriptions() {
     })
     unsubscribe({ assetClass, tickers: [tickerToRemove] })
   }
+
+  useEffect(() => {
+    if (lastEvent) {
+      const event = lastEvent as WsEvent<SubscribeResponse>
+
+      if (event.type === 'subscribe' || event.type === 'unsubscribed') {
+        const { asset, status, symbol } = event.payload
+        const symbolList = symbol.length > 0 ? symbol.join(' ') : ''
+        const msg = `${asset} has been ${status}${symbolList ? `: ${symbolList}` : ''}`
+
+        switch (status) {
+          case 'subscribed':
+            toast.success(msg)
+            break
+          case 'unsubscribed':
+            toast.info(msg)
+            break
+          case 'error':
+            toast.error(msg)
+            break
+          default:
+            toast.warning(`Unknown subscription status: ${msg}`)
+            break
+        }
+      }
+    }
+  }, [lastEvent])
 
   return (
     <>
