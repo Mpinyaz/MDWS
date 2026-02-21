@@ -87,6 +87,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    depends_on:
+      influxdb2:
+        condition: service_started
     restart: unless-stopped
     networks:
       - app-network

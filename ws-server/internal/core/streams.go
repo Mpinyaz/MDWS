@@ -38,80 +38,61 @@ func InitMktStreams(mgr *Manager) error {
 		return fmt.Errorf("failed to create stream environment: %w", err)
 	}
 
-	const MAX_RETRIES = 5
-	const RETRY_DELAY = 5 * time.Second
-
-	for i := 0; i < MAX_RETRIES; i++ {
-		log.Printf("Attempt %d/%d to initialize RabbitMQ stream components...", i+1, MAX_RETRIES)
-
-		var initErr error // Declared once for the loop scope
-
-		ctx, cancel := context.WithCancel(context.Background())
-		streams := &MdwsStreams{
-			env:    env,
-			ctx:    ctx,
-			cancel: cancel,
-			cfg:    cfg,
-		}
-
-		// Initialize InfluxDB client
-		streams.influxClient = influxdb2.NewClient(cfg.InfluxDBURL, cfg.InfluxDBToken)
-		streams.influxWriteAPI = streams.influxClient.WriteAPI(cfg.InfluxDBOrg, cfg.InfluxDBBucket)
-
-		// Check InfluxDB connection (optional, but good practice)
-		_, err = streams.influxClient.Health(context.Background())
-		if err != nil {
-			initErr = fmt.Errorf("influxDB health check failed: %w", err)
-			log.Printf("InfluxDB health check failed: %v", initErr)
-		} else {
-			log.Printf("InfluxDB client initialized for URL: %s, Org: %s, Bucket: %s", cfg.InfluxDBURL, cfg.InfluxDBOrg, cfg.InfluxDBBucket)
-		}
-
-		// Listen for write errors asynchronously
-		go func() {
-			for {
-				select {
-				case err := <-streams.influxWriteAPI.Errors():
-					log.Printf("InfluxDB write error: %v", err.Error())
-				case <-streams.ctx.Done():
-					return
-				}
-			}
-		}()
-
-		// Proceed with creating consumer and producer directly
-		var mktUpdates *stream.Consumer
-		if mktUpdates, initErr = createUpdateConsumer(env, cfg, streams); initErr != nil {
-			log.Printf("Update consumer creation failed: %v", initErr)
-		} else {
-			streams.mktUpdates = mktUpdates
-			log.Printf("Market updates consumer created on stream '%s'", cfg.RmqMarketUpdate)
-
-			var mktSubscriptions *stream.Producer
-			if mktSubscriptions, initErr = createSubsProducer(env, cfg); initErr != nil {
-				log.Printf("Subscription producer creation failed: %v", initErr)
-			} else {
-				streams.mktSubscriptions = mktSubscriptions
-				log.Printf("Market subscriptions producer created on stream '%s'", cfg.RmqMarketSubs)
-
-				// All successful in this attempt!
-				streams.broadcastChan = mgr.Broadcast
-				mgr.SetStreams(streams)
-				log.Printf("Market data streams initialized successfully")
-				return nil // Success
-			}
-		}
-
-		// If we reached here, something failed in this attempt. Clean up and retry.
-		streams.Close() // Close any resources opened in this attempt
-		if i < MAX_RETRIES-1 {
-			log.Printf("Retrying in %v...", RETRY_DELAY)
-			time.Sleep(RETRY_DELAY)
-		}
+	ctx, cancel := context.WithCancel(context.Background())
+	streams := &MdwsStreams{
+		env:    env,
+		ctx:    ctx,
+		cancel: cancel,
+		cfg:    cfg,
 	}
 
-	// All retries failed
-	return fmt.Errorf("failed to initialize RabbitMQ stream components after %d attempts", MAX_RETRIES)
+	// Initialize InfluxDB client
+	streams.influxClient = influxdb2.NewClient(cfg.InfluxDBURL, cfg.InfluxDBToken)
+	streams.influxWriteAPI = streams.influxClient.WriteAPI(cfg.InfluxDBOrg, cfg.InfluxDBBucket)
+
+	// Check InfluxDB connection (optional, but good practice)
+	_, err = streams.influxClient.Health(context.Background())
+	if err != nil {
+		streams.Close() // Clean up before returning error
+		return fmt.Errorf("influxDB health check failed: %w", err)
+	} else {
+		log.Printf("InfluxDB client initialized for URL: %s, Org: %s, Bucket: %s", cfg.InfluxDBURL, cfg.InfluxDBOrg, cfg.InfluxDBBucket)
+	}
+
+	// Listen for write errors asynchronously
+	go func() {
+		for {
+			select {
+			case err := <-streams.influxWriteAPI.Errors():
+				log.Printf("InfluxDB write error: %v", err.Error())
+			case <-streams.ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Proceed with creating consumer and producer directly
+	var mktUpdates *stream.Consumer
+	if mktUpdates, err = createUpdateConsumer(env, cfg, streams); err != nil {
+		streams.Close() // Clean up before returning error
+		return fmt.Errorf("update consumer creation failed: %w", err)
+	}
+	streams.mktUpdates = mktUpdates
+	log.Printf("Market updates consumer created on stream '%s'", cfg.RmqMarketUpdate)
+
+	var mktSubscriptions *stream.Producer
+	if mktSubscriptions, err = createSubsProducer(env, cfg); err != nil {
+		streams.Close() // Clean up before returning error
+		return fmt.Errorf("subscription producer creation failed: %w", err)
+	}
+	streams.mktSubscriptions = mktSubscriptions
+	log.Printf("Market subscriptions producer created on stream '%s'", cfg.RmqMarketSubs)
+
+	// All successful!
+	streams.broadcastChan = mgr.Broadcast
+	mgr.SetStreams(streams)
+	log.Printf("Market data streams initialized successfully")
+	return nil // Success
 }
 
 // Close gracefully shuts down all stream connections

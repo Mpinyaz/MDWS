@@ -1,46 +1,45 @@
-use mdanalytics::read_data_frame_from_csv;
+use influxdb::{Client, ReadQuery};
+use mdanalytics::json_to_dataframe;
 use polars::prelude::*;
 
-fn main() -> PolarsResult<()> {
-    let df = read_data_frame_from_csv("./input.csv".into());
-    println!("Schema: \n{:?} ", df.schema());
-    let area = df
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenvy::dotenv()?;
+    let url = std::env::var("INFLUXDB_URL").expect("database url is required");
+    let token = std::env::var("INFLUXDB_TOKEN").expect("Token is rquired");
+    let client = Client::new(url, "marketupdates").with_token(token);
+
+    // --- 1. CRYPTO ---
+    let crypto_raw = client.query(ReadQuery::new("SELECT * FROM crypto")).await?;
+    let df_crypto = json_to_dataframe(&crypto_raw, &["last_price", "last_size"])?;
+
+    let crypto_stats = df_crypto
         .lazy()
-        .with_column((col("SepalWidthCm") * col("SepalLengthCm")).alias("SepalArea"))
-        .collect()
-        .unwrap();
-
-    if let Some(arr) = area.get(26) {
-        for val in arr {
-            println!("{:?}", val)
-        }
-    }
-
-    println!("{:?}", area);
-
-    let describe = area
-        .clone()
-        .lazy()
-        .select([
-            col("SepalWidthCm").mean().alias("Average Sepal Width"),
-            col("SepalWidthCm").var(1).alias("Variation"),
-            col("SepalArea").max().alias("Maximum Sepal Area"),
+        .group_by([col("ticker")])
+        .agg([
+            col("time").min().alias("start_time"),
+            col("time").max().alias("end_time"),
+            col("last_price").count().alias("data_points"),
+            col("last_price").mean().alias("avg_price"),
         ])
-        .collect();
-    println!("{:?}", describe);
-
-    let filter: DataFrame = area
-        .clone()
-        .lazy()
-        .filter(col("SepalLengthCm").gt(lit(5.2)))
         .collect()?;
 
-    println!("{}", filter);
-    println!("{:?}", filter.get_column_names());
+    // --- 2. FOREX ---
+    let forex_raw = client.query(ReadQuery::new("SELECT * FROM forex")).await?;
+    let df_forex = json_to_dataframe(&forex_raw, &["bid_price", "ask_price", "mid_price"])?;
 
-    let slice = area.column("SepalLengthCm")?.slice(30, 10);
-    println!("{:?}", slice);
+    let forex_stats = df_forex
+        .lazy()
+        .group_by([col("ticker")])
+        .agg([
+            col("time").min().alias("start_time"),
+            col("mid_price").count().alias("data_points"),
+            col("mid_price").mean().alias("avg_mid"),
+        ])
+        .collect()?;
 
-    println!("Length {:?}", slice.len());
+    println!("=== CRYPTO STATS ===\n{}", crypto_stats);
+    println!("=== FOREX STATS ===\n{}", forex_stats);
+
     Ok(())
 }
