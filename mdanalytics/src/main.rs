@@ -1,46 +1,39 @@
-use mdanalytics::read_data_frame_from_csv;
-use polars::prelude::*;
+pub mod api;
+pub mod models;
+pub mod utils;
+use crate::{
+    models::AppState,
+    utils::{init_redis_conn, init_tracing, AppConfig},
+};
+use axum::{routing::post, Router};
+use influxdb::Client;
+use tower_http::trace::TraceLayer;
+use tracing::info;
 
-fn main() -> PolarsResult<()> {
-    let df = read_data_frame_from_csv("./input.csv".into());
-    println!("Schema: \n{:?} ", df.schema());
-    let area = df
-        .lazy()
-        .with_column((col("SepalWidthCm") * col("SepalLengthCm")).alias("SepalArea"))
-        .collect()
-        .unwrap();
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cfg = AppConfig::load()?;
 
-    if let Some(arr) = area.get(26) {
-        for val in arr {
-            println!("{:?}", val)
-        }
-    }
+    init_tracing(cfg.log);
 
-    println!("{:?}", area);
+    let client = Client::new(&cfg.db_url, &cfg.db_bucket).with_token(cfg.db_token);
+    info!("Successfully connected to influx db: {}", &cfg.db_url);
 
-    let describe = area
-        .clone()
-        .lazy()
-        .select([
-            col("SepalWidthCm").mean().alias("Average Sepal Width"),
-            col("SepalWidthCm").var(1).alias("Variation"),
-            col("SepalArea").max().alias("Maximum Sepal Area"),
-        ])
-        .collect();
-    println!("{:?}", describe);
+    let redis = init_redis_conn(&cfg.redis_url)
+        .await
+        .expect("Failed to connect to Redis");
+    info!("Succesfully connected to redis client: {}", &cfg.redis_url);
 
-    let filter: DataFrame = area
-        .clone()
-        .lazy()
-        .filter(col("SepalLengthCm").gt(lit(5.2)))
-        .collect()?;
+    let state = AppState { db: client, redis };
 
-    println!("{}", filter);
-    println!("{:?}", filter.get_column_names());
+    let app = Router::new()
+        .route("/submit/job", post(api::submit_job))
+        .route("/analyze/{job_id}/stream", post(api::sse_handler))
+        .with_state(state)
+        .layer(TraceLayer::new_for_http());
 
-    let slice = area.column("SepalLengthCm")?.slice(30, 10);
-    println!("{:?}", slice);
+    let listener = tokio::net::TcpListener::bind(cfg.app_url).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 
-    println!("Length {:?}", slice.len());
     Ok(())
 }

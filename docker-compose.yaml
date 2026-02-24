@@ -25,6 +25,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - app-network
@@ -41,7 +43,28 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  mdanalytics:
+    build:
+      context: ./mdanalytics
+      dockerfile: Dockerfile
+    container_name: mdws_analytics
+    env_file:
+      - .env
+    environment:
+      REDIS_ADDRS: "redis://redis-standalone:6379/"
+      MDANALYTICS_URL: "0.0.0.0:3030"
+    ports:
+      - "3030:3030"
+    depends_on:
+      redis:
+        condition: service_healthy
+      influxdb2:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - app-network
@@ -58,6 +81,11 @@ services:
       - "6380:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: always
     networks:
       - app-network
@@ -87,6 +115,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    depends_on:
+      influxdb2:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - app-network
@@ -114,6 +145,11 @@ services:
       - type: volume
         source: influxdb2-config
         target: /etc/influxdb2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     networks:
       - app-network

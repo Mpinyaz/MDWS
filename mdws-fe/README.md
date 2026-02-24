@@ -1,5 +1,49 @@
 Welcome to your new TanStack app!
 
+# MDWS Frontend Application
+
+## Overview
+This is the frontend application for the Market Data WebSocket (MDWS) platform. It provides a real-time user interface for displaying market data updates streamed via WebSockets from the backend services. The application allows users to view live market information, manage subscriptions, and interact with various financial instruments.
+
+## Technologies & Architecture
+This frontend application is built on a modern web stack, emphasizing type-safety, performance, and developer experience.
+
+### Core Technologies
+-   **React**: A declarative, component-based JavaScript library for building user interfaces.
+-   **TypeScript**: A strongly typed superset of JavaScript that enhances code quality and maintainability.
+-   **Bun**: Used as the JavaScript runtime, package manager, and bundler, offering significant performance improvements.
+-   **TanStack Router**: A powerful, type-safe routing library for React applications, utilizing a file-based routing approach.
+-   **Tailwind CSS**: A utility-first CSS framework for rapidly building custom designs.
+-   **React Query (TanStack Query)**: Handles data fetching, caching, synchronization, and server state management, reducing boilerplate.
+-   **TanStack Store**: A simple yet powerful reactive state management library, integrated for local and global state needs.
+-   **WebSockets**: Utilized for real-time, bidirectional communication with the backend for live market data streams.
+
+### Project Structure
+The `src/` directory organizes the application into logical modules:
+-   `src/components`: Contains reusable UI components, such as `Header`, `TickerCard`, and `ui` elements.
+-   `src/context`: Provides React Context APIs for managing global state, like market WebSocket connections (`MktSocketCtx`) and ticker data (`TickersCtx`).
+-   `src/hooks`: Houses custom React hooks to encapsulate and reuse stateful logic across components (e.g., `useMarketWs`).
+-   `src/lib`: General utility functions and helper modules (e.g., `utils.ts`).
+-   `src/routes`: Defines the application's navigation structure using TanStack Router's file-based routing.
+-   `src/services`: Integrates with backend APIs and services, including the WebSocket client (`websocket.ts`).
+-   `src/types`: Stores TypeScript interface and type definitions for data structures (e.g., `event.ts`, `subscriptions.ts`).
+
+## Backend Integration & Platform Architecture Overview
+
+The MDWS Frontend application is an integral part of a larger Market Data WebSocket Distribution Architecture. It connects to dedicated **WebSocket Pods** (implemented in Go, Node.js, or Python) which serve as the primary interface for real-time market data.
+
+These pods are responsible for:
+-   Receiving dynamic subscription requests from frontend clients.
+-   Managing connections to third-party market data feeds (e.g., Tiingo for Crypto, Forex, and Equity).
+-   Efficiently fanning out live market updates to subscribed frontend clients.
+
+Behind these WebSocket Pods, a robust backend infrastructure ensures scalability and reliability:
+-   **Redis**: Used for tracking upstream subscriptions and optionally caching last snapshot values.
+-   **RabbitMQ**: (Optional) Can be used for message buffering and routing within the backend system.
+-   **Kubernetes**: Orchestrates the scalable deployment of WebSocket Pods.
+
+This architecture ensures that the frontend receives high-performance, real-time market data with dynamic subscription capabilities, allowing users to efficiently monitor various financial instruments.
+
 # Getting Started
 
 To run this application:
