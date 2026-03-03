@@ -65,8 +65,9 @@ function Subscriptions() {
 
       if (event.type === 'subscribe' || event.type === 'unsubscribed') {
         const { asset, status, symbol } = event.payload
+        const displayAsset = asset === 'crypto_data' ? 'crypto' : asset
         const symbolList = symbol.length > 0 ? symbol.join(' ') : ''
-        const msg = `${asset} has been ${status}${symbolList ? `: ${symbolList}` : ''}`
+        const msg = `${displayAsset} has been ${status}${symbolList ? `: ${symbolList}` : ''}`
 
         switch (status) {
           case 'subscribed':
