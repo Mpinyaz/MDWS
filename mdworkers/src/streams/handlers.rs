@@ -81,7 +81,7 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
         // Create subscription data
         let sub_data = crate::types::message::SubscribeData {
             subscription_id: None,
-            threshold_level: Some("2".to_string()),
+            threshold_level: Some("5".to_string()),
             tickers: Some(event.payload.tickers.clone()),
         };
 

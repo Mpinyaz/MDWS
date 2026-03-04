@@ -6,6 +6,7 @@ use crate::types::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{self, Value};
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -99,6 +100,7 @@ async fn ws_actor(
     info!("🎭 Actor started for {:?}", asset_class);
 
     let mut current_conn_opt = Some(initial_conn);
+    let mut active_tickers: HashSet<String> = HashSet::new();
 
     loop {
         let conn = if let Some(c) = current_conn_opt.take() {
@@ -123,9 +125,55 @@ async fn ws_actor(
 
         let (mut write, mut read) = conn.split();
 
+        // Re-subscribe if we have active tickers
+        if !active_tickers.is_empty() {
+            let tickers: Vec<String> = active_tickers.iter().cloned().collect();
+            info!(
+                "🔄 Re-subscribing to {} tickers for {:?}",
+                tickers.len(),
+                asset_class
+            );
+            let sub_data = SubscribeData {
+                tickers: Some(tickers),
+                subscription_id: None,
+                threshold_level: Some("5".to_string()), // Default threshold
+            };
+            if let Err(e) = handle_command(
+                &mut write,
+                &api_key,
+                WsCommand::Subscribe(sub_data),
+                asset_class,
+            )
+            .await
+            {
+                error!(
+                    "❌ Failed to re-subscribe for {:?} after reconnect: {}",
+                    asset_class, e
+                );
+            }
+        }
+
         let connection_result: Result<(), MsgError> = loop {
             tokio::select! {
                 Some(cmd) = cmd_rx.recv() => {
+                    // Update tracked tickers
+                    match &cmd {
+                        WsCommand::Subscribe(data) => {
+                            if let Some(tickers) = &data.tickers {
+                                for ticker in tickers {
+                                    active_tickers.insert(ticker.clone());
+                                }
+                            }
+                        }
+                        WsCommand::Unsubscribe(data) => {
+                            if let Some(tickers) = &data.tickers {
+                                for ticker in tickers {
+                                    active_tickers.remove(ticker);
+                                }
+                            }
+                        }
+                    }
+
                     if let Err(e) = handle_command(&mut write, &api_key, cmd, asset_class).await {
                         error!("❌ Command error for {:?}: {}", asset_class, e);
                     }

@@ -6,7 +6,7 @@ use crate::utils::init_tracing;
 use crate::utils::AppConfig;
 use axum::{routing::post, Router};
 use influxdb::Client;
-use mdanalytics::types::WebAppState;
+use crate::types::WebAppState;
 use redis::aio::ConnectionManager;
 use tower_http::trace::TraceLayer;
 use tracing::info;

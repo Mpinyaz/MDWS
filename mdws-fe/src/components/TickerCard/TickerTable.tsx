@@ -40,6 +40,12 @@ const TickerTable = ({
         return (
           <>
             <tr className="border-b border-gray-700">
+              <td className="font-bold p-2">Type</td>
+              <td className="p-2 text-right">
+                {cryptoData.update_type === 'T' ? 'Trade' : 'Quote'}
+              </td>
+            </tr>
+            <tr className="border-b border-gray-700">
               <td className="font-bold p-2">Time</td>
               <td className="p-2 text-right">{cryptoData.date}</td>
             </tr>
