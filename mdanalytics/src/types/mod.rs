@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Error as SerdeJsonError;
 use serde_json::Value;
 use snowflake_me::Error as SnowflakeError;
-use std::{fmt, str::FromStr};
+use std::fmt;
 
 use color_eyre::eyre::Result;
 use ratatui::prelude::*;
@@ -51,16 +51,23 @@ impl fmt::Display for AssetClass {
     }
 }
 
-impl FromStr for AssetClass {
-    type Err = String;
+impl TryFrom<&str> for AssetClass {
+    type Error = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s.to_lowercase().as_str() {
             "crypto" | "crypto_data" => Ok(AssetClass::Crypto),
             "forex" => Ok(AssetClass::Forex),
             "equity" => Ok(AssetClass::Equity),
-            _ => Err(format!("Unknown AssetClass: {}", s)),
+            _ => Err(format!("Unknown asset class: {}", s)),
         }
+    }
+}
+
+impl TryFrom<&String> for AssetClass {
+    type Error = String;
+    fn try_from(s: &String) -> Result<Self, Self::Error> {
+        AssetClass::try_from(s.as_str())
     }
 }
 

@@ -19,15 +19,6 @@ struct SubscribePayload {
     tickers: Vec<String>,
 }
 
-fn parse_asset_class(s: &str) -> Option<AssetClass> {
-    match s.to_lowercase().as_str() {
-        "forex" => Some(AssetClass::Forex),
-        "crypto" => Some(AssetClass::Crypto),
-        "equity" => Some(AssetClass::Equity),
-        _ => None,
-    }
-}
-
 /// Run subscription consumer - receives events from RabbitMQ and sends commands to actors
 pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
     let mut consumer = create_sub_consumer()
@@ -61,10 +52,10 @@ pub async fn run_sub_consumer(channels: WsChannels) -> Result<(), MsgError> {
             }
         };
 
-        let asset = match parse_asset_class(&event.payload.asset_class) {
-            Some(a) => a,
-            None => {
-                error!("Unknown asset class: {}", event.payload.asset_class);
+        let asset = match AssetClass::try_from(&event.payload.asset_class) {
+            Ok(ac) => ac,
+            Err(e) => {
+                error!("{}", e);
                 continue;
             }
         };

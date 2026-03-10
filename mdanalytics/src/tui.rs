@@ -105,9 +105,9 @@ async fn main() -> Result<()> {
                     AppMessage::WsConfirmation(conf_resp) => {
                         // Handle adding/removing ticker based on confirmation
                         if let Some(_) = app.pending_manage_action.take() {
-                            let response_asset_class_enum = conf_resp.payload.asset.parse::<AssetClass>();
+                            let response_asset_class_enum = AssetClass::try_from(&conf_resp.payload.asset);
                             if let Ok(asset_class_enum) = response_asset_class_enum {
-                                if let Some(ticker_from_response) = conf_resp.payload.symbol.get(0) {
+                                if let Some(ticker_from_response) = conf_resp.payload.symbol.first() {
                                     if conf_resp.payload.status == "subscribed" {
                                         app.set_ws_status(format!("Successfully subscribed to {}", ticker_from_response), Color::Green, tx.clone());
                                     } else if conf_resp.payload.status == "unsubscribed" {
@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
                                         app.set_ws_status(format!("Unhandled status: {} for {}", conf_resp.payload.status, ticker_from_response), Color::Yellow, tx.clone());
                                     }
                                 } else {
-                                    app.set_ws_status(format!("WS Confirmation: Missing ticker symbol"), Color::Red, tx.clone());
+                                    app.set_ws_status("WS Confirmation: Missing ticker symbol".to_string(), Color::Red, tx.clone());
                                 }
                             } else {
                                 app.set_ws_status(format!("WS Confirmation: Unknown asset class: {}", conf_resp.payload.asset), Color::Red, tx.clone());
@@ -622,7 +622,8 @@ fn render_market_table(
                                 "Q" => "Quote",
                                 "B" => "Bar",
                                 _ => update_type,
-                            }.to_string(),
+                            }
+                            .to_string(),
                             price.to_string(),
                             vol.to_string(),
                             date.parse::<DateTime<Utc>>()
