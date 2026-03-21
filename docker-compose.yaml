@@ -17,8 +17,8 @@ services:
 
   mdwsworkers:
     build:
-      context: ./mdworkers
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: mdworkers/Dockerfile
     container_name: mdws_workers
     env_file:
       - .env
@@ -50,8 +50,8 @@ services:
 
   mdanalytics:
     build:
-      context: ./mdanalytics
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: mdanalytics/Dockerfile
     container_name: mdws_analytics
     env_file:
       - .env

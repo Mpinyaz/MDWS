@@ -1,17 +1,18 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use influxdb::Client;
+use mdworkers::types::AssetClass;
 use polars::error::PolarsError;
-use redis::aio::ConnectionManager;
 use redis::RedisError;
+use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Error as SerdeJsonError;
 use serde_json::Value;
 use snowflake_me::Error as SnowflakeError;
-use std::{fmt, str::FromStr};
 
 use color_eyre::eyre::Result;
 use ratatui::prelude::*;
+use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -21,47 +22,6 @@ pub enum JobEvent {
     Processing,
     Completed { result: Value },
     Failed { error: String },
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "camelCase")]
-pub enum AssetClass {
-    Crypto,
-    Forex,
-    Equity,
-}
-
-impl AssetClass {
-    pub fn measurement(&self) -> &'static str {
-        match self {
-            AssetClass::Crypto => "crypto",
-            AssetClass::Forex => "forex",
-            AssetClass::Equity => "equity",
-        }
-    }
-}
-
-impl fmt::Display for AssetClass {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            AssetClass::Crypto => write!(f, "crypto"),
-            AssetClass::Forex => write!(f, "forex"),
-            AssetClass::Equity => write!(f, "equity"),
-        }
-    }
-}
-
-impl FromStr for AssetClass {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "crypto" | "crypto_data" => Ok(AssetClass::Crypto),
-            "forex" => Ok(AssetClass::Forex),
-            "equity" => Ok(AssetClass::Equity),
-            _ => Err(format!("Unknown AssetClass: {}", s)),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -164,7 +124,6 @@ pub struct AnalyzeRequest {
     pub asset_class: AssetClass,
     pub tickers: Vec<String>,
 }
-
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzeResponse {
@@ -225,16 +184,12 @@ pub enum Payload {
     },
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Default)]
 pub enum ActiveScreen {
+    #[default]
     Dashboard,
     Manage,
-}
-
-impl Default for ActiveScreen {
-    fn default() -> Self {
-        ActiveScreen::Dashboard
-    }
+    Analytics,
 }
 
 pub enum ManageAction {
@@ -292,6 +247,8 @@ pub struct TuiApp {
     pub manage_selected_ticker_index: usize,
     pub show_popup: bool,
     pub popup_action: Option<ManageAction>,
+    // Analytics screen state
+    pub analytics_table_state: TableState,
     // WebSocket outgoing sender
     pub ws_out_tx: Option<mpsc::UnboundedSender<String>>,
     // WebSocket incoming confirmation display
@@ -343,6 +300,7 @@ impl Default for TuiApp {
             manage_selected_ticker_index: 0,
             show_popup: false,
             popup_action: None,
+            analytics_table_state: TableState::default(),
             ws_out_tx: None,
             ws_status_message: String::from("Ready"),
             ws_status_color: Color::Gray,
@@ -375,13 +333,15 @@ impl TuiApp {
     pub fn next_screen(&mut self) {
         self.active_screen = match self.active_screen {
             ActiveScreen::Dashboard => ActiveScreen::Manage,
-            ActiveScreen::Manage => ActiveScreen::Dashboard,
+            ActiveScreen::Manage => ActiveScreen::Analytics,
+            ActiveScreen::Analytics => ActiveScreen::Dashboard,
         };
     }
 
     pub fn prev_screen(&mut self) {
         self.active_screen = match self.active_screen {
-            ActiveScreen::Dashboard => ActiveScreen::Manage,
+            ActiveScreen::Dashboard => ActiveScreen::Analytics,
+            ActiveScreen::Analytics => ActiveScreen::Manage,
             ActiveScreen::Manage => ActiveScreen::Dashboard,
         };
     }
@@ -400,22 +360,26 @@ impl TuiApp {
 
     // Manage screen helper methods
     pub fn select_next_manage_ticker(&mut self) {
-        if let Some(tickers) = self.tickers.get(&self.manage_selected_asset_class) {
-            if !tickers.is_empty() {
-                self.manage_selected_ticker_index = self
-                    .manage_selected_ticker_index
-                    .saturating_add(1)
-                    .min(tickers.len() - 1);
-            }
+        if let Some(tickers) = self
+            .tickers
+            .get(&self.manage_selected_asset_class)
+            .filter(|t| !t.is_empty())
+        {
+            self.manage_selected_ticker_index = self
+                .manage_selected_ticker_index
+                .saturating_add(1)
+                .min(tickers.len() - 1);
         }
     }
 
     pub fn select_prev_manage_ticker(&mut self) {
-        if let Some(tickers) = self.tickers.get(&self.manage_selected_asset_class) {
-            if !tickers.is_empty() {
-                self.manage_selected_ticker_index =
-                    self.manage_selected_ticker_index.saturating_sub(1).max(0);
-            }
+        if self
+            .tickers
+            .get(&self.manage_selected_asset_class)
+            .is_some_and(|t| !t.is_empty())
+        {
+            self.manage_selected_ticker_index = self.manage_selected_ticker_index.saturating_sub(1);
+            // .max(0) is redundant with saturating_sub(1) for usize
         }
     }
 
@@ -427,6 +391,43 @@ impl TuiApp {
     pub fn trigger_unsubscribe_popup(&mut self) {
         self.show_popup = true;
         self.popup_action = Some(ManageAction::Unsubscribe);
+    }
+
+    // Analytics screen navigation
+    pub fn select_next_analytics_ticker(&mut self, total_rows: usize) {
+        if total_rows == 0 {
+            self.analytics_table_state.select(None);
+            return;
+        }
+        let i = match self.analytics_table_state.selected() {
+            Some(i) => {
+                if i >= total_rows - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.analytics_table_state.select(Some(i));
+    }
+
+    pub fn select_prev_analytics_ticker(&mut self, total_rows: usize) {
+        if total_rows == 0 {
+            self.analytics_table_state.select(None);
+            return;
+        }
+        let i = match self.analytics_table_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    total_rows - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.analytics_table_state.select(Some(i));
     }
 
     pub fn confirm_manage_action(&mut self) {
@@ -465,10 +466,10 @@ impl TuiApp {
                 payload,
             };
 
-            if let Some(tx) = &self.ws_out_tx {
-                if let Ok(json_message) = serde_json::to_string(&ws_request) {
-                    let _ = tx.send(json_message);
-                }
+            if let Some(tx) = &self.ws_out_tx
+                && let Ok(json_message) = serde_json::to_string(&ws_request)
+            {
+                let _ = tx.send(json_message);
             }
         }
 
