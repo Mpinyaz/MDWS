@@ -12,7 +12,8 @@ use mdanalytics::types::AppMessage;
 use mdanalytics::types::ManageAction;
 use mdanalytics::types::TuiApp;
 use mdanalytics::types::WsResponse;
-use mdanalytics::types::{AssetClass, ConfirmationPayload, MarketUpdate, Payload};
+use mdanalytics::types::{ConfirmationPayload, MarketUpdate, Payload};
+use mdcore::AssetClass;
 use ratatui::{
     prelude::*,
     style::Stylize,
@@ -23,6 +24,7 @@ use ratatui::{
 };
 use std::{collections::HashMap, io::stdout};
 use tokio::sync::mpsc;
+use tracing::error;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,7 +62,7 @@ async fn main() -> Result<()> {
                             let unhandled_message = format!("Failed to parse WS message: {:?}", text);
                             // Try to parse as WsResponse to get more specific error
                             if let Err(e) = serde_json::from_str::<WsResponse>(text) {
-                                eprintln!("Failed to parse as WsResponse: {} for text: {}", e, text);
+                                error!("Failed to parse as WsResponse: {} for text: {}", e, text);
                                 let _ = tx_websocket_handler.send(AppMessage::WsConfirmation(WsResponse {
                                     message_type: "error".to_string(),
                                     payload: ConfirmationPayload {
@@ -96,7 +98,7 @@ async fn main() -> Result<()> {
     let mut event_stream = event::EventStream::new();
 
     while app.running {
-        terminal.draw(|f| ui(f, &app))?;
+        terminal.draw(|f| ui(f, &mut app))?;
 
         tokio::select! {
             Some(app_msg) = rx.recv() => {
@@ -107,7 +109,7 @@ async fn main() -> Result<()> {
                         if let Some(_) = app.pending_manage_action.take() {
                             let response_asset_class_enum = conf_resp.payload.asset.parse::<AssetClass>();
                             if let Ok(asset_class_enum) = response_asset_class_enum {
-                                if let Some(ticker_from_response) = conf_resp.payload.symbol.get(0) {
+                                if let Some(ticker_from_response) = conf_resp.payload.symbol.first() {
                                     if conf_resp.payload.status == "subscribed" {
                                         app.set_ws_status(format!("Successfully subscribed to {}", ticker_from_response), Color::Green, tx.clone());
                                     } else if conf_resp.payload.status == "unsubscribed" {
@@ -121,7 +123,7 @@ async fn main() -> Result<()> {
                                         app.set_ws_status(format!("Unhandled status: {} for {}", conf_resp.payload.status, ticker_from_response), Color::Yellow, tx.clone());
                                     }
                                 } else {
-                                    app.set_ws_status(format!("WS Confirmation: Missing ticker symbol"), Color::Red, tx.clone());
+                                    app.set_ws_status("WS Confirmation: Missing ticker symbol".to_string(), Color::Red, tx.clone());
                                 }
                             } else {
                                 app.set_ws_status(format!("WS Confirmation: Unknown asset class: {}", conf_resp.payload.asset), Color::Red, tx.clone());
@@ -175,6 +177,13 @@ async fn main() -> Result<()> {
                                     KeyCode::Char('u') => app.trigger_unsubscribe_popup(), // Trigger unsubscribe popup
                                     _ => {}
                                 }
+                            } else if app.active_screen == ActiveScreen::Analytics {
+                                let total_rows = app.forex.len() + app.crypto.len() + app.equity.len();
+                                match key.code {
+                                    KeyCode::Up => app.select_prev_analytics_ticker(total_rows),
+                                    KeyCode::Down => app.select_next_analytics_ticker(total_rows),
+                                    _ => {}
+                                }
                             } else { // Handle Dashboard screen navigation
                                 match key.code {
                                     KeyCode::Right | KeyCode::Char('l') => app.next_tab(),
@@ -205,7 +214,7 @@ fn restore_terminal() -> Result<()> {
     Ok(())
 }
 
-fn ui(frame: &mut Frame, app: &TuiApp) {
+fn ui(frame: &mut Frame, app: &mut TuiApp) {
     let overall_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -244,6 +253,7 @@ fn ui(frame: &mut Frame, app: &TuiApp) {
     match app.active_screen {
         ActiveScreen::Dashboard => render_dashboard_screen(frame, screen_content_area, app),
         ActiveScreen::Manage => render_manage_screen(frame, screen_content_area, app),
+        ActiveScreen::Analytics => render_analytics_screen(frame, screen_content_area, app),
     }
 
     render_status_bar(frame, status_area, app);
@@ -292,7 +302,152 @@ fn render_dashboard_screen(frame: &mut Frame, area: Rect, app: &TuiApp) {
     }
 }
 
-fn render_manage_screen(frame: &mut Frame, area: Rect, app: &TuiApp) {
+fn render_analytics_screen(frame: &mut Frame, area: Rect, app: &mut TuiApp) {
+    let analytics_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(7), // Summary section
+            Constraint::Min(0),    // Details section
+        ])
+        .split(area);
+
+    let summary_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+        ])
+        .split(analytics_layout[0]);
+
+    // Helper for rendering summary cards
+    let render_summary_card =
+        |f: &mut Frame, area: Rect, title: &str, count: usize, color: Color| {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(color));
+            let content = Paragraph::new(format!("\nActive Tickers: {}", count))
+                .alignment(Alignment::Center)
+                .block(block);
+            f.render_widget(content, area);
+        };
+
+    render_summary_card(
+        frame,
+        summary_layout[0],
+        "Forex",
+        app.forex.len(),
+        Color::Cyan,
+    );
+    render_summary_card(
+        frame,
+        summary_layout[1],
+        "Crypto",
+        app.crypto.len(),
+        Color::Yellow,
+    );
+    render_summary_card(
+        frame,
+        summary_layout[2],
+        "Equity",
+        app.equity.len(),
+        Color::Magenta,
+    );
+
+    // Details: A table showing stats for all active tickers
+    let mut all_rows = Vec::new();
+
+    let format_time = |time: &str| {
+        time.parse::<DateTime<Utc>>()
+            .map(|dt| dt.with_timezone(&Local).format("%H:%M:%S").to_string())
+            .unwrap_or_else(|_| time.to_string())
+    };
+
+    // Helper to get sorted tickers from a hashmap
+    let get_sorted_tickers = |map: &HashMap<String, MarketUpdate>| {
+        let mut tickers: Vec<_> = map.keys().cloned().collect();
+        tickers.sort();
+        tickers
+    };
+
+    // Add Forex
+    for ticker in get_sorted_tickers(&app.forex) {
+        if let Some(update) = app.forex.get(&ticker) {
+            if let Payload::Forex { mid_price, .. } = &update.payload {
+                all_rows.push(Row::new(vec![
+                    ticker.clone(),
+                    "Forex".to_string(),
+                    format!("{:.4}", mid_price),
+                    format_time(&update.time),
+                ]));
+            }
+        }
+    }
+    // Add Crypto
+    for ticker in get_sorted_tickers(&app.crypto) {
+        if let Some(update) = app.crypto.get(&ticker) {
+            if let Payload::Crypto { last_price, .. } = &update.payload {
+                all_rows.push(Row::new(vec![
+                    ticker.clone(),
+                    "Crypto".to_string(),
+                    format!("{:.2}", last_price),
+                    format_time(&update.time),
+                ]));
+            }
+        }
+    }
+    // Add Equity
+    for ticker in get_sorted_tickers(&app.equity) {
+        if let Some(update) = app.equity.get(&ticker) {
+            if let Payload::Equity {
+                last_price,
+                mid_price,
+                ..
+            } = &update.payload
+            {
+                let price = last_price.or(*mid_price).unwrap_or(0.0);
+                all_rows.push(Row::new(vec![
+                    ticker.clone(),
+                    "Equity".to_string(),
+                    format!("{:.2}", price),
+                    format_time(&update.time),
+                ]));
+            }
+        }
+    }
+
+    let header = Row::new(vec!["Ticker", "Class", "Last Price", "Updated At"])
+        .style(Style::default().bold().blue())
+        .bottom_margin(1);
+
+    let widths = [
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+    ];
+
+    let legend_text = " Use <Up/Down> to scroll, <Tab> to change screen ";
+
+    let table = Table::new(all_rows, widths)
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Asset Analytics Detail")
+                .title_alignment(Alignment::Center)
+                .title(legend_text)
+                .title_position(TitlePosition::Bottom),
+        )
+        .column_spacing(1)
+        .style(Style::default().fg(Color::White))
+        .row_highlight_style(Style::default().reversed())
+        .highlight_symbol(">>");
+
+    frame.render_stateful_widget(table, analytics_layout[1], &mut app.analytics_table_state);
+}
+fn render_manage_screen(frame: &mut Frame, area: Rect, app: &mut TuiApp) {
     let manage_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -334,10 +489,7 @@ fn render_manage_screen(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let manage_legend =
         "<Up/Down>: Select,<s>: Subscribe,<u>: Unsubscribe,<h,l>: Change Asset Class";
 
-    let list_title = format!(
-        "Available {} Tickers",
-        app.manage_selected_asset_class.to_string()
-    );
+    let list_title = format!("Available {} Tickers", app.manage_selected_asset_class);
     let list = List::new(items)
         .block(
             Block::default()
@@ -447,7 +599,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn render_sidebar(frame: &mut Frame, area: Rect, app: &TuiApp) {
-    let titles = ["Dashboard", "Manage"];
+    let titles = ["Dashboard", "Manage", "Analytics"];
     let items: Vec<ListItem> = titles.iter().map(|&s| ListItem::new(s)).collect();
 
     let list = List::new(items)
@@ -467,6 +619,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let selected_index = match app.active_screen {
         ActiveScreen::Dashboard => 0,
         ActiveScreen::Manage => 1,
+        ActiveScreen::Analytics => 2,
     };
 
     let mut state = ListState::default();
@@ -622,7 +775,8 @@ fn render_market_table(
                                 "Q" => "Quote",
                                 "B" => "Bar",
                                 _ => update_type,
-                            }.to_string(),
+                            }
+                            .to_string(),
                             price.to_string(),
                             vol.to_string(),
                             date.parse::<DateTime<Utc>>()
