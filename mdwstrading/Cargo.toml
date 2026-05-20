@@ -28,3 +28,4 @@ polars = { version = "0.53.0", features = [
   "json",
 ] }
 ta = "0.5.0"
+reqwest = { version = "0.13.3", features = ["json"] }

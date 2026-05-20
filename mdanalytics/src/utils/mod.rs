@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub redis_url: String,
     pub db_bucket: String,
     pub app_url: String,
+    pub tiingo_api_key: String,
 }
 
 impl AppConfig {
@@ -24,6 +25,7 @@ impl AppConfig {
         let redis_url = std::env::var("REDIS_ADDRS").expect("Redis url is rquired");
         let db_bucket = std::env::var("INFLUXDB_BUCKET").expect("InfluxDB bucket is required");
         let app_url = std::env::var("MDANALYTICS_URL").expect("App url is required");
+        let tiingo_api_key = std::env::var("TIINGO_API_KEY").expect("Tiingo API key is required");
         Ok(AppConfig {
             log,
             db_url,
@@ -31,6 +33,7 @@ impl AppConfig {
             redis_url,
             db_bucket,
             app_url,
+            tiingo_api_key,
         })
     }
 }

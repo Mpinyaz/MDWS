@@ -12,9 +12,9 @@ use snowflake_me::Error as SnowflakeError;
 
 use ratatui::prelude::*;
 use ratatui::widgets::TableState;
+use reqwest::Client as ReqClient;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum JobEvent {
@@ -27,6 +27,8 @@ pub enum JobEvent {
 pub struct WebAppState {
     pub db: Client,
     pub redis: ConnectionManager,
+    pub request: ReqClient,
+    pub tiingo_api_key: String,
 }
 
 #[derive(Debug)]
@@ -37,6 +39,7 @@ pub enum ApiError {
     Snowflake(SnowflakeError),
     Redis(RedisError),
     BadRequest(String),
+    Http(reqwest::Error),
 }
 
 impl From<influxdb::Error> for ApiError {
@@ -75,6 +78,13 @@ impl From<RedisError> for ApiError {
         ApiError::Redis(err)
     }
 }
+
+impl From<reqwest::Error> for ApiError {
+    fn from(err: reqwest::Error) -> Self {
+        ApiError::Http(err)
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
@@ -98,6 +108,10 @@ impl IntoResponse for ApiError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Redis error: {}", err),
             ),
+            ApiError::Http(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("HTTP error: {}", err),
+            ),
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, format!("Bad request: {}", msg)),
         };
         (status, error_message).into_response()
@@ -113,6 +127,7 @@ impl std::fmt::Display for ApiError {
             ApiError::Snowflake(err) => write!(f, "Snowflake error: {}", err),
             ApiError::BadRequest(msg) => write!(f, "Bad request: {}", msg),
             ApiError::Redis(err) => write!(f, "Redis error: {}", err),
+            ApiError::Http(err) => write!(f, "HTTP error: {}", err),
         }
     }
 }

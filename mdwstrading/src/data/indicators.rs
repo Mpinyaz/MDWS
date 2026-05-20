@@ -1,9 +1,34 @@
-use crate::data::Ohlcv;
 use chrono::NaiveDateTime;
+use mdcore::Ohlcv;
 use polars::{df, error::PolarsResult, frame::DataFrame, prelude::Column};
 use rust_decimal::prelude::ToPrimitive;
-use ta::indicators::{AverageTrueRange, ExponentialMovingAverage, RelativeStrengthIndex};
+use ta::indicators::{
+    AverageTrueRange, BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex,
+    SimpleMovingAverage,
+};
 use ta::{DataItem, Next};
+
+pub struct IndicatorConfig {
+    pub rsi_period: usize,
+    pub ema_fast_period: usize,
+    pub sma_period: usize,
+    pub atr_period: usize,
+    pub bb_period: usize,
+    pub bb_std_dev: f64,
+}
+
+impl Default for IndicatorConfig {
+    fn default() -> Self {
+        Self {
+            rsi_period: 14,
+            sma_period: 50,
+            ema_fast_period: 12,
+            atr_period: 14,
+            bb_period: 20,
+            bb_std_dev: 2.0,
+        }
+    }
+}
 
 pub fn ohlcv_to_df(data: Vec<Ohlcv>) -> PolarsResult<DataFrame> {
     let mut ts = Vec::with_capacity(data.len());
@@ -51,22 +76,26 @@ pub fn ohlcv_to_df(data: Vec<Ohlcv>) -> PolarsResult<DataFrame> {
         "volume" => vol_f64,
     )
 }
-pub fn compute_indicators(data: Vec<Ohlcv>) -> PolarsResult<DataFrame> {
-    // 1. Get the base DataFrame
+
+pub fn compute_indicators(data: Vec<Ohlcv>, cfg: IndicatorConfig) -> PolarsResult<DataFrame> {
     let df = ohlcv_to_df(data.clone())?;
 
-    // 2. Initialize Indicators
-    let mut rsi = RelativeStrengthIndex::new(14).unwrap();
-    let mut ema_fast = ExponentialMovingAverage::new(12).unwrap();
-    let mut atr = AverageTrueRange::new(14).unwrap();
+    // Use config values for initialization
+    let mut sma = SimpleMovingAverage::new(cfg.sma_period).unwrap();
+    let mut rsi = RelativeStrengthIndex::new(cfg.rsi_period).unwrap();
+    let mut ema_fast = ExponentialMovingAverage::new(cfg.ema_fast_period).unwrap();
+    let mut atr = AverageTrueRange::new(cfg.atr_period).unwrap();
+    let mut bb = BollingerBands::new(cfg.bb_period, cfg.bb_std_dev).unwrap();
 
-    // 3. Process data using ta::DataItem
     let mut rsi_vals = Vec::with_capacity(data.len());
     let mut ema_vals = Vec::with_capacity(data.len());
+    let mut sma_vals = Vec::with_capacity(data.len());
     let mut atr_vals = Vec::with_capacity(data.len());
+    let mut bb_upper = Vec::with_capacity(data.len());
+    let mut bb_middle = Vec::with_capacity(data.len());
+    let mut bb_lower = Vec::with_capacity(data.len());
 
     for item in data {
-        // Build DataItem for indicators that need OHLCV (like ATR)
         let out = DataItem::builder()
             .open(item.open.to_f64().unwrap_or(f64::NAN))
             .high(item.high.to_f64().unwrap_or(f64::NAN))
@@ -76,15 +105,24 @@ pub fn compute_indicators(data: Vec<Ohlcv>) -> PolarsResult<DataFrame> {
             .build()
             .unwrap();
 
+        let bb_out = bb.next(&out);
+        bb_upper.push(bb_out.upper);
+        bb_middle.push(bb_out.average);
+        bb_lower.push(bb_out.lower);
+
         rsi_vals.push(rsi.next(&out));
         ema_vals.push(ema_fast.next(&out));
+        sma_vals.push(sma.next(&out));
         atr_vals.push(atr.next(&out));
     }
 
-    // 4. Attach columns back to DataFrame
     df.hstack(&[
-        Column::new("rsi_14".into(), rsi_vals),
-        Column::new("ema_12".into(), ema_vals),
-        Column::new("atr_14".into(), atr_vals),
+        Column::new("rsi".into(), rsi_vals),
+        Column::new(format!("ema_{}", cfg.ema_fast_period).into(), ema_vals),
+        Column::new("atr".into(), atr_vals),
+        Column::new(format!("sma_{}", cfg.sma_period).into(), sma_vals),
+        Column::new("bb_upper".into(), bb_upper),
+        Column::new("bb_middle".into(), bb_middle),
+        Column::new("bb_lower".into(), bb_lower),
     ])
 }

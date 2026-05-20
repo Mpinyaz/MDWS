@@ -14,6 +14,7 @@ RUN cargo build --release
 # Production stage
 FROM debian:bullseye-slim
 WORKDIR /app
-COPY --from=build /app/mdanalytics/target/release/mdanalytics .
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/mdanalytics/target/release/server .
 COPY --from=build /app/mdanalytics/target/release/tui .
-CMD ["./mdanalytics"]
+CMD ["./server"]

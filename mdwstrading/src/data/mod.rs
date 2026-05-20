@@ -1,8 +1,6 @@
 use chrono::{DateTime, Utc};
 use mdcore::AssetClass;
 use rust_decimal::Decimal;
-use serde::Deserialize;
-use serde::Serialize;
 
 pub mod feed;
 pub mod indicators;
@@ -64,13 +62,4 @@ pub struct Greeks {
     /// Sensitivity to a 1% move in the risk-free rate.
     /// Positive for calls, negative for puts.
     pub rho: Decimal,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Ohlcv {
-    pub timestamp: DateTime<Utc>,
-    pub open: Decimal,
-    pub high: Decimal,
-    pub low: Decimal,
-    pub close: Decimal,
-    pub volume: Decimal,
 }
