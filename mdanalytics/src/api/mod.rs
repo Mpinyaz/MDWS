@@ -9,7 +9,7 @@ use futures_util::stream::{Stream, StreamExt};
 use influxdb::ReadQuery;
 use mdanalytics::dataframe_to_json_value;
 use mdanalytics::json_to_dataframe;
-use mdcore::AssetClass;
+use mdcore::{AssetClass, AssetRequest, Ohlcv};
 use polars::prelude::*;
 use redis::AsyncCommands;
 use serde_json::Value;
@@ -185,10 +185,7 @@ async fn fetch_and_process_data(
         ticker_filter
     );
 
-    // info!("Executing InfluxDB query: {}", query_string); // Debug log
-    info!("Executing InfluxDB query: {}", query); // Debug log
     let raw_data = db_client.query(ReadQuery::new(query)).await?;
-    info!("Raw data from InfluxDB: {:?}", raw_data); // Added for debugging
 
     let df = match payload.asset_class {
         // Match directly on AssetClass enum
@@ -203,7 +200,7 @@ async fn fetch_and_process_data(
 
     if df.height() == 0 {
         return Ok(AnalyzeResponse {
-            job_id: "".to_string(), // This will be filled later, or handled differently if no data.
+            job_id: "".to_string(),
             asset_class: payload.asset_class.to_string(),
             data: Vec::new(),
         });
@@ -238,4 +235,59 @@ async fn fetch_and_process_data(
         asset_class: payload.asset_class.to_string(),
         data: data_vec,
     })
+}
+
+pub async fn fetch_ohlcv(
+    State(state): State<WebAppState>,
+    Json(payload): Json<AssetRequest>,
+) -> Result<Json<Vec<Ohlcv>>, ApiError> {
+    let ticker = payload.ticker.to_uppercase();
+    let start_date = payload.datefrom.format("%Y-%m-%d").to_string();
+    let end_date = payload.dateto.format("%Y-%m-%d").to_string();
+
+    let url = match payload.assetclass {
+        AssetClass::Forex => format!(
+            "https://api.tiingo.com/tiingo/fx/{}/prices?startDate={}&endDate={}&resampleFreq=12hour&token={}",
+            ticker, start_date, end_date, state.tiingo_api_key
+        ),
+        AssetClass::Equity => format!(
+            "https://api.tiingo.com/tiingo/iex/{}/prices?startDate={}&endDate={}&resampleFreq=12hour&token={}",
+            ticker, start_date, end_date, state.tiingo_api_key
+        ),
+        AssetClass::Crypto => format!(
+            "https://api.tiingo.com/tiingo/crypto/prices?tickers={}&startDate={}&endDate={}&resampleFreq=12hour&token={}",
+            ticker, start_date, end_date, state.tiingo_api_key
+        ),
+    };
+
+    let response = state
+        .request
+        .get(&url)
+        .header("Content-Type", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let err_text = response.text().await.unwrap_or_default();
+        return Err(ApiError::BadRequest(format!(
+            "Tiingo API error: {}",
+            err_text
+        )));
+    }
+
+    let json_val: Value = response.json().await?;
+
+    let ohlcv_data: Vec<Ohlcv> = match payload.assetclass {
+        AssetClass::Crypto => {
+            let data = json_val
+                .get(0)
+                .and_then(|v| v.get("priceData"))
+                .cloned()
+                .unwrap_or_else(|| Value::Array(vec![]));
+            serde_json::from_value(data)?
+        }
+        _ => serde_json::from_value(json_val)?,
+    };
+
+    Ok(Json(ohlcv_data))
 }

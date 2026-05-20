@@ -1,4 +1,6 @@
+use chrono::{DateTime, NaiveDate, Utc};
 use core::fmt;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -47,4 +49,24 @@ impl FromStr for AssetClass {
             _ => Err(format!("Unknown AssetClass: {}", s)),
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AssetRequest {
+    pub ticker: String,
+    pub assetclass: AssetClass,
+    pub datefrom: NaiveDate,
+    pub dateto: NaiveDate,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Ohlcv {
+    #[serde(alias = "date")]
+    pub timestamp: DateTime<Utc>,
+    pub open: Decimal,
+    pub high: Decimal,
+    pub low: Decimal,
+    pub close: Decimal,
+    #[serde(default)]
+    pub volume: Decimal,
 }

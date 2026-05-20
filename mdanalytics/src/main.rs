@@ -1,12 +1,12 @@
 pub mod api;
 pub mod types;
 pub mod utils;
+use crate::types::WebAppState;
 use crate::utils::init_redis_conn;
 use crate::utils::init_tracing;
 use crate::utils::AppConfig;
 use axum::{routing::post, Router};
 use influxdb::Client;
-use crate::types::WebAppState;
 use redis::aio::ConnectionManager;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -25,11 +25,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to connect to Redis");
     info!("Succesfully connected to redis client: {}", &cfg.redis_url);
 
-    let state = WebAppState { db: client, redis };
+    let state = WebAppState {
+        db: client,
+        redis,
+        request: reqwest::Client::new(),
+        tiingo_api_key: cfg.tiingo_api_key,
+    };
 
     let app = Router::new()
         .route("/submit/job", post(api::submit_job))
         .route("/analyze/{job_id}/stream", post(api::sse_handler))
+        .route("/fetch/ohlcv", post(api::fetch_ohlcv))
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
