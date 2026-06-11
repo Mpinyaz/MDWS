@@ -29,3 +29,4 @@ polars = { version = "0.53.0", features = [
 ] }
 ta = "0.5.0"
 reqwest = { version = "0.13.3", features = ["json"] }
+dashmap = { version = "6.2.1", features = ["serde"] }

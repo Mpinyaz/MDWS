@@ -1,128 +1,247 @@
 use chrono::NaiveDateTime;
+use dashmap::DashMap;
 use mdcore::Ohlcv;
-use polars::{df, error::PolarsResult, frame::DataFrame, prelude::Column};
 use rust_decimal::prelude::ToPrimitive;
+
 use ta::indicators::{
     AverageTrueRange, BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex,
     SimpleMovingAverage,
 };
 use ta::{DataItem, Next};
 
+#[derive(Clone)]
 pub struct IndicatorConfig {
     pub rsi_period: usize,
     pub ema_fast_period: usize,
+    pub ema_slow_period: usize,
+    pub macd_signal_period: usize,
+
     pub sma_period: usize,
     pub atr_period: usize,
     pub bb_period: usize,
     pub bb_std_dev: f64,
+
+    pub roc_period: usize,
+    pub vol_period: usize,
 }
 
 impl Default for IndicatorConfig {
     fn default() -> Self {
         Self {
             rsi_period: 14,
-            sma_period: 50,
             ema_fast_period: 12,
+            ema_slow_period: 26,
+            macd_signal_period: 9,
+
+            sma_period: 50,
             atr_period: 14,
             bb_period: 20,
             bb_std_dev: 2.0,
+
+            roc_period: 10,
+            vol_period: 20,
         }
     }
 }
 
-pub fn ohlcv_to_df(data: Vec<Ohlcv>) -> PolarsResult<DataFrame> {
-    let mut ts = Vec::with_capacity(data.len());
-    let mut open = Vec::with_capacity(data.len());
-    let mut high = Vec::with_capacity(data.len());
-    let mut low = Vec::with_capacity(data.len());
-    let mut close = Vec::with_capacity(data.len());
-    let mut vol = Vec::with_capacity(data.len());
+// ============================
+// FEATURE OUTPUT
+// ============================
+#[derive(Debug, Clone)]
+pub struct FeatureVector {
+    pub symbol: String,
+    pub timestamp: NaiveDateTime,
 
-    for item in data {
-        ts.push(item.timestamp);
-        open.push(item.open);
-        high.push(item.high);
-        low.push(item.low);
-        close.push(item.close);
-        vol.push(item.volume);
-    }
-    let naive_ts: Vec<NaiveDateTime> = ts.into_iter().map(|dt| dt.naive_utc()).collect();
-    let open_f64: Vec<f64> = open
-        .into_iter()
-        .map(|d| d.to_f64().unwrap_or(f64::NAN))
-        .collect();
-    let close_f64: Vec<f64> = close
-        .into_iter()
-        .map(|d| d.to_f64().unwrap_or(f64::NAN))
-        .collect();
-    let high_f64: Vec<f64> = high
-        .into_iter()
-        .map(|d| d.to_f64().unwrap_or(f64::NAN))
-        .collect();
-    let low_f64: Vec<f64> = low
-        .into_iter()
-        .map(|d| d.to_f64().unwrap_or(f64::NAN))
-        .collect();
-    let vol_f64: Vec<f64> = vol
-        .into_iter()
-        .map(|d| d.to_f64().unwrap_or(f64::NAN))
-        .collect();
-    df!(
-        "timestamp" => naive_ts,
-        "open" => open_f64,
-        "high" => high_f64,
-        "low" => low_f64,
-        "close" => close_f64,
-        "volume" => vol_f64,
-    )
+    pub rsi: f64,
+    pub sma: f64,
+    pub ema_fast: f64,
+    pub atr: f64,
+
+    pub bb_upper: f64,
+    pub bb_middle: f64,
+    pub bb_lower: f64,
+
+    pub macd: f64,
+    pub macd_signal: f64,
+    pub macd_hist: f64,
+
+    pub roc: f64,
+    pub hist_vol: f64,
+    pub vwap: f64,
+}
+pub struct Indicators {
+    pub cfg: IndicatorConfig,
+
+    // TA indicators
+    pub rsi: RelativeStrengthIndex,
+    pub sma: SimpleMovingAverage,
+    pub ema_fast: ExponentialMovingAverage,
+    pub ema_slow: ExponentialMovingAverage,
+    pub ema_signal: ExponentialMovingAverage,
+    pub atr: AverageTrueRange,
+    pub bb: BollingerBands,
+
+    // VWAP state
+    pub vwap_pv: f64,
+    pub vwap_vol: f64,
+
+    // history buffers
+    pub closes: Vec<f64>,
+    pub log_returns: Vec<f64>,
 }
 
-pub fn compute_indicators(data: Vec<Ohlcv>, cfg: IndicatorConfig) -> PolarsResult<DataFrame> {
-    let df = ohlcv_to_df(data.clone())?;
+impl Indicators {
+    pub fn new(cfg: IndicatorConfig) -> Self {
+        Self {
+            rsi: RelativeStrengthIndex::new(cfg.rsi_period).unwrap(),
+            sma: SimpleMovingAverage::new(cfg.sma_period).unwrap(),
+            ema_fast: ExponentialMovingAverage::new(cfg.ema_fast_period).unwrap(),
+            ema_slow: ExponentialMovingAverage::new(cfg.ema_slow_period).unwrap(),
+            ema_signal: ExponentialMovingAverage::new(cfg.macd_signal_period).unwrap(),
+            atr: AverageTrueRange::new(cfg.atr_period).unwrap(),
+            bb: BollingerBands::new(cfg.bb_period, cfg.bb_std_dev).unwrap(),
 
-    // Use config values for initialization
-    let mut sma = SimpleMovingAverage::new(cfg.sma_period).unwrap();
-    let mut rsi = RelativeStrengthIndex::new(cfg.rsi_period).unwrap();
-    let mut ema_fast = ExponentialMovingAverage::new(cfg.ema_fast_period).unwrap();
-    let mut atr = AverageTrueRange::new(cfg.atr_period).unwrap();
-    let mut bb = BollingerBands::new(cfg.bb_period, cfg.bb_std_dev).unwrap();
+            vwap_pv: 0.0,
+            vwap_vol: 0.0,
 
-    let mut rsi_vals = Vec::with_capacity(data.len());
-    let mut ema_vals = Vec::with_capacity(data.len());
-    let mut sma_vals = Vec::with_capacity(data.len());
-    let mut atr_vals = Vec::with_capacity(data.len());
-    let mut bb_upper = Vec::with_capacity(data.len());
-    let mut bb_middle = Vec::with_capacity(data.len());
-    let mut bb_lower = Vec::with_capacity(data.len());
+            closes: Vec::new(),
+            log_returns: Vec::new(),
 
-    for item in data {
-        let out = DataItem::builder()
-            .open(item.open.to_f64().unwrap_or(f64::NAN))
-            .high(item.high.to_f64().unwrap_or(f64::NAN))
-            .low(item.low.to_f64().unwrap_or(f64::NAN))
-            .close(item.close.to_f64().unwrap_or(f64::NAN))
-            .volume(item.volume.to_f64().unwrap_or(f64::NAN))
+            cfg,
+        }
+    }
+
+    pub fn update(&mut self, symbol: &str, item: &Ohlcv) -> FeatureVector {
+        let open = item.open.to_f64().unwrap_or(f64::NAN);
+        let high = item.high.to_f64().unwrap_or(f64::NAN);
+        let low = item.low.to_f64().unwrap_or(f64::NAN);
+        let close = item.close.to_f64().unwrap_or(f64::NAN);
+        let vol = item.volume.to_f64().unwrap_or(0.0);
+
+        let di = DataItem::builder()
+            .open(open)
+            .high(high)
+            .low(low)
+            .close(close)
+            .volume(vol)
             .build()
             .unwrap();
 
-        let bb_out = bb.next(&out);
-        bb_upper.push(bb_out.upper);
-        bb_middle.push(bb_out.average);
-        bb_lower.push(bb_out.lower);
+        let typical = (high + low + close) / 3.0;
+        self.vwap_pv += typical * vol;
+        self.vwap_vol += vol;
 
-        rsi_vals.push(rsi.next(&out));
-        ema_vals.push(ema_fast.next(&out));
-        sma_vals.push(sma.next(&out));
-        atr_vals.push(atr.next(&out));
+        let vwap = if self.vwap_vol > 0.0 {
+            self.vwap_pv / self.vwap_vol
+        } else {
+            f64::NAN
+        };
+
+        // ============================
+        // MACD
+        // ============================
+        let fast = self.ema_fast.next(close);
+        let slow = self.ema_slow.next(close);
+
+        let macd = fast - slow;
+        let signal = self.ema_signal.next(macd);
+        let hist = macd - signal;
+
+        // ============================
+        // ROC
+        // ============================
+        self.closes.push(close);
+
+        let roc = if self.closes.len() > self.cfg.roc_period {
+            let prev = self.closes[self.closes.len() - self.cfg.roc_period - 1];
+            if prev != 0.0 {
+                (close / prev) - 1.0
+            } else {
+                f64::NAN
+            }
+        } else {
+            f64::NAN
+        };
+
+        // ============================
+        // Historical Volatility
+        // ============================
+        let hist_vol = if self.closes.len() > 1 {
+            let prev = self.closes[self.closes.len() - 2];
+
+            if prev > 0.0 && close > 0.0 {
+                self.log_returns.push((close / prev).ln());
+            }
+
+            let n = self.cfg.vol_period;
+
+            if self.log_returns.len() > n {
+                let window = &self.log_returns[self.log_returns.len() - n..];
+
+                let mean = window.iter().sum::<f64>() / n as f64;
+
+                let var = window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
+
+                var.sqrt()
+            } else {
+                f64::NAN
+            }
+        } else {
+            f64::NAN
+        };
+
+        // ============================
+        // OUTPUT
+        // ============================
+        FeatureVector {
+            symbol: symbol.to_string(),
+            timestamp: item.timestamp.naive_utc(),
+
+            rsi: self.rsi.next(&di),
+            sma: self.sma.next(&di),
+            ema_fast: fast,
+            atr: self.atr.next(&di),
+
+            bb_upper: self.bb.next(&di).upper,
+            bb_middle: self.bb.next(&di).average,
+            bb_lower: self.bb.next(&di).lower,
+
+            macd,
+            macd_signal: signal,
+            macd_hist: hist,
+
+            roc,
+            hist_vol,
+            vwap,
+        }
     }
+}
 
-    df.hstack(&[
-        Column::new("rsi".into(), rsi_vals),
-        Column::new(format!("ema_{}", cfg.ema_fast_period).into(), ema_vals),
-        Column::new("atr".into(), atr_vals),
-        Column::new(format!("sma_{}", cfg.sma_period).into(), sma_vals),
-        Column::new("bb_upper".into(), bb_upper),
-        Column::new("bb_middle".into(), bb_middle),
-        Column::new("bb_lower".into(), bb_lower),
-    ])
+pub fn run_backtest(mut state: Indicators, symbol: &str, data: Vec<Ohlcv>) -> Vec<FeatureVector> {
+    data.iter().map(|c| state.update(symbol, c)).collect()
+}
+
+pub struct MultiSymbolEngine {
+    pub cfg: IndicatorConfig,
+    pub states: DashMap<String, Indicators>,
+}
+
+impl MultiSymbolEngine {
+    pub fn new(cfg: IndicatorConfig) -> Self {
+        Self {
+            cfg,
+            states: DashMap::new(),
+        }
+    }
+}
+
+impl MultiSymbolEngine {
+    pub fn process(&self, symbol: &str, candle: &Ohlcv) -> FeatureVector {
+        let mut state = self
+            .states
+            .entry(symbol.to_string())
+            .or_insert_with(|| Indicators::new(self.cfg.clone()));
+
+        state.update(symbol, candle)
+    }
 }
