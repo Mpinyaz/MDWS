@@ -285,7 +285,7 @@ fn render_dashboard_screen(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let tabs = Tabs::new(titles)
         .select(selected_index)
         .style(Style::default().green())
-        .highlight_style(Style::default().bold().blue());
+        .highlight_style(Style::default().bold().yellow());
 
     frame.render_widget(tabs, dashboard_layout[0]);
 

@@ -52,15 +52,14 @@ pub fn calculate_sortino_ratio(returns: &[Decimal], target_return: Decimal) -> O
 
     let mean = calculate_mean_return(returns)?;
 
-    // Use filter_map to isolate returns below target and calculate their squared differences
     let sum_sq_downside: Decimal = returns
         .iter()
         .filter_map(|&r| {
             if r < target_return {
                 let diff = r - target_return;
-                Some(diff * diff) // Keeps this transformed value
+                Some(diff * diff)
             } else {
-                None // Filters out returns >= target_return
+                None
             }
         })
         .sum();

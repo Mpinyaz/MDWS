@@ -13,3 +13,4 @@ target
 ws-server/mdws
 /mdanalytics/target
 *.pem
+/mdanalytics/bin
