@@ -51,12 +51,13 @@ impl FromStr for AssetClass {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetRequest {
     pub ticker: String,
     pub assetclass: AssetClass,
     pub datefrom: NaiveDate,
     pub dateto: NaiveDate,
+    pub frequency: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
