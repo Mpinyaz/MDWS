@@ -1,37 +1,34 @@
 use chrono::NaiveDateTime;
 use dashmap::DashMap;
-use mdcore::{AssetClass, Ohlcv};
+use mdcore::{EquityFrequency, Frequency, MarketMetadata, Ohlcv, StdFrequency};
 use rust_decimal::prelude::ToPrimitive;
 
-pub fn get_annualization_factor(frequency: &str, asset_class: AssetClass) -> f64 {
-    let days_per_year = match asset_class {
-        AssetClass::Crypto => 365.0,
-        AssetClass::Forex => 260.0,
-        AssetClass::Equity => 252.0,
-    };
+pub fn get_annualization_factor(freq: Frequency) -> f64 {
+    match freq {
+        Frequency::Std(frequency) => {
+            let periods_per_day = match frequency {
+                StdFrequency::Day => 1.0,
+                StdFrequency::HalfDay => 2.0,
+                StdFrequency::Hour4 => 6.0,
+                StdFrequency::Hourly => 24.0,
+                StdFrequency::Min30 => 24.0 * 2.0,
+                StdFrequency::Min15 => 24.0 * 4.0,
+                StdFrequency::Min5 => 24.0 * 12.0,
+                StdFrequency::Minute => 24.0 * 60.0,
+                StdFrequency::Sec5 => 24.0 * 60.0 * 12.0,
+                StdFrequency::Second => 24.0 * 3600.0,
+            };
+            365.0 * periods_per_day
+        }
 
-    let periods_per_day = match frequency.to_lowercase().as_str() {
-        "daily" | "1day" => 1.0,
-        "hourly" | "1hour" | "60min" => match asset_class {
-            AssetClass::Equity => 6.5,
-            _ => 24.0,
+        Frequency::Equity(frequency) => match frequency {
+            EquityFrequency::Hourly => 252.0 * 6.5,
+            EquityFrequency::Daily => 252.0,
+            EquityFrequency::Weekly => 52.0,
+            EquityFrequency::Monthly => 12.0,
+            EquityFrequency::Yearly => 1.0,
         },
-        "15min" => match asset_class {
-            AssetClass::Equity => 6.5 * 4.0,
-            _ => 24.0 * 4.0,
-        },
-        "5min" => match asset_class {
-            AssetClass::Equity => 6.5 * 12.0,
-            _ => 24.0 * 12.0,
-        },
-        "1min" => match asset_class {
-            AssetClass::Equity => 6.5 * 60.0,
-            _ => 24.0 * 60.0,
-        },
-        _ => 1.0,
-    };
-
-    days_per_year * periods_per_day
+    }
 }
 
 use ta::indicators::{
@@ -310,12 +307,7 @@ pub struct ReturnStats {
 }
 
 impl ReturnStats {
-    pub fn calculate(
-        symbol: String,
-        freq: String,
-        assetclass: AssetClass,
-        ohlcv: &[Ohlcv],
-    ) -> Option<Self> {
+    pub fn calculate(symbol: &str, meta: MarketMetadata, ohlcv: &[Ohlcv]) -> Option<Self> {
         if ohlcv.len() < 2 {
             return None;
         }
@@ -387,11 +379,11 @@ impl ReturnStats {
             0.0
         };
 
-        let ann_factor = get_annualization_factor(&freq, assetclass);
-        let annualized_volatility = stddev * ann_factor;
+        let ann_factor = get_annualization_factor(meta.frequency);
+        let annualized_volatility = stddev * ann_factor.sqrt();
 
         let sharpe_ratio = if stddev > 0.0 {
-            (mean / stddev) * ann_factor
+            (mean / stddev) * ann_factor.sqrt()
         } else {
             0.0
         };
@@ -427,7 +419,7 @@ impl ReturnStats {
         let negative_pct = neg_count as f64 / count as f64;
 
         Some(Self {
-            symbol,
+            symbol: symbol.to_string(),
             count,
             mean,
             median,
@@ -460,18 +452,13 @@ pub struct TickerStats {
 }
 
 impl TickerStats {
-    pub fn calculate(
-        symbol: String,
-        freq: String,
-        assetclass: AssetClass,
-        ohlcv: &[Ohlcv],
-    ) -> Option<Self> {
-        let descriptive = ReturnStats::calculate(symbol.clone(), freq, assetclass, ohlcv)?;
+    pub fn calculate(symbol: &str, meta: MarketMetadata, ohlcv: &[Ohlcv]) -> Option<Self> {
+        let descriptive = ReturnStats::calculate(symbol, meta, ohlcv)?;
 
         let mut indicators = Indicators::new(IndicatorConfig::default());
         let mut last_feature = None;
         for item in ohlcv {
-            last_feature = Some(indicators.update(&symbol, item));
+            last_feature = Some(indicators.update(symbol, item));
         }
 
         Some(Self {
@@ -485,6 +472,7 @@ impl TickerStats {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use mdcore::AssetClass;
     use rust_decimal_macros::dec;
 
     #[test]
@@ -517,9 +505,11 @@ mod tests {
             },
         ];
 
-        let stats =
-            ReturnStats::calculate("Dummy".into(), "15min".into(), AssetClass::Crypto, &ohlcv)
-                .unwrap();
+        let meta = MarketMetadata {
+            asset_class: AssetClass::Crypto,
+            frequency: Frequency::Std(StdFrequency::Minute),
+        };
+        let stats = ReturnStats::calculate("Dummy", meta, &ohlcv).unwrap();
         assert_eq!(stats.count, 2);
 
         let r1 = (105.0 / 100.0f64).ln();
@@ -532,6 +522,10 @@ mod tests {
         let expected_stddev =
             (((r1 - expected_mean).powi(2) + (r2 - expected_mean).powi(2)) / 1.0f64).sqrt();
         assert!((stats.stddev - expected_stddev).abs() < 1e-9);
+
+        let ann_factor = get_annualization_factor(meta.frequency);
+        let expected_ann_vol = expected_stddev * ann_factor.sqrt();
+        assert!((stats.annualized_volatility - expected_ann_vol).abs() < 1e-9);
 
         assert_eq!(stats.min, r2.min(r1));
         assert_eq!(stats.max, r2.max(r1));
@@ -578,9 +572,11 @@ mod tests {
             },
         ];
 
-        let stats =
-            TickerStats::calculate("TEST".into(), "1min".into(), AssetClass::Crypto, &ohlcv)
-                .unwrap();
+        let meta = MarketMetadata {
+            asset_class: AssetClass::Crypto,
+            frequency: Frequency::Std(StdFrequency::Second),
+        };
+        let stats = TickerStats::calculate("TEST", meta, &ohlcv).unwrap();
         assert_eq!(stats.descriptive.symbol, "TEST");
         assert_eq!(stats.descriptive.count, 2);
         assert_eq!(stats.feature.symbol, "TEST");

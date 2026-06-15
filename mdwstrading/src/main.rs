@@ -1,8 +1,7 @@
 use mdcore::{AssetClass, AssetRequest, Ohlcv};
-
-use reqwest::Client;
-
+use mdcore::{Frequency, MarketMetadata};
 use mdwstrading::data::indicators::{IndicatorConfig, IndicatorsEngine, ReturnStats};
+use reqwest::Client;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let payload = AssetRequest {
         ticker: "BTCUSD".to_string(),
-        frequency: "15min".into(),
+        frequency: Frequency::Std(mdcore::StdFrequency::Min30),
 
         assetclass: AssetClass::Crypto,
 
@@ -36,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut features_list = Vec::new();
 
     for candle in &candles {
-        let features = engine.process(&payload.ticker, &candle);
+        let features = engine.process(&payload.ticker, candle);
 
         println!("{:#?}", features);
         features_list.push(features);
@@ -237,12 +236,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("=================================");
 
-        if let Some(stats) = ReturnStats::calculate(
-            payload.ticker,
-            payload.frequency,
-            payload.assetclass,
-            &candles,
-        ) {
+        let meta = MarketMetadata {
+            asset_class: payload.assetclass,
+            frequency: payload.frequency,
+        };
+
+        if let Some(stats) = ReturnStats::calculate(&payload.ticker, meta, &candles) {
             println!("\n=================================");
             println!("RETURN STATISTICS FROM LOG RETURNS");
             println!("=================================");

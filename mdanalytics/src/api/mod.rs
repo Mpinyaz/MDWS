@@ -9,7 +9,7 @@ use futures_util::stream::{Stream, StreamExt};
 use influxdb::ReadQuery;
 use mdanalytics::dataframe_to_json_value;
 use mdanalytics::json_to_dataframe;
-use mdcore::{AssetClass, AssetRequest, Ohlcv};
+use mdcore::{AssetClass, AssetRequest, MarketMetadata, Ohlcv};
 use mdwstrading::data::indicators::TickerStats;
 use polars::prelude::*;
 use redis::AsyncCommands;
@@ -246,6 +246,10 @@ pub async fn fetch_ohlcv(
     let start_date = payload.datefrom.format("%Y-%m-%d").to_string();
     let end_date = payload.dateto.format("%Y-%m-%d").to_string();
 
+    payload
+        .validate_freq()
+        .map_err(|e| ApiError::BadRequest(e))?;
+
     let url = match payload.assetclass {
         AssetClass::Forex => format!(
             "https://api.tiingo.com/tiingo/fx/{}/prices?startDate={}&endDate={}&resampleFreq={}&token={}",
@@ -301,10 +305,12 @@ pub async fn generate_stats(
 ) -> Result<Json<TickerStats>, ApiError> {
     let ohlcv_result = fetch_ohlcv(State(state.clone()), Json(payload.clone())).await?;
     let data = ohlcv_result.0;
-    let stats =
-        TickerStats::calculate(payload.ticker, payload.frequency, payload.assetclass, &data)
-            .ok_or_else(|| {
-                ApiError::BadRequest("Failed to calculate stats: insufficient data".to_string())
-            })?;
+    let meta = MarketMetadata {
+        frequency: payload.frequency,
+        asset_class: payload.assetclass,
+    };
+    let stats = TickerStats::calculate(&payload.ticker, meta, &data).ok_or_else(|| {
+        ApiError::BadRequest("Failed to calculate stats: insufficient data".to_string())
+    })?;
     Ok(Json(stats))
 }
