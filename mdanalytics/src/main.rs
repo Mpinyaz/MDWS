@@ -36,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/submit/job", post(api::submit_job))
         .route("/analyze/{job_id}/stream", post(api::sse_handler))
         .route("/fetch/ohlcv", post(api::fetch_ohlcv))
+        .route("/stats", post(api::generate_stats))
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 

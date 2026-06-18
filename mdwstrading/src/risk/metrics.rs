@@ -1,6 +1,5 @@
 use rust_decimal::Decimal;
 use rust_decimal::{prelude::ToPrimitive, MathematicalOps};
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 
 /// Calculates the mean return of a series of returns.
@@ -219,6 +218,7 @@ pub fn calculate_portfolio_volatility(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_mean_return() {

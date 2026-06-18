@@ -9,7 +9,8 @@ use futures_util::stream::{Stream, StreamExt};
 use influxdb::ReadQuery;
 use mdanalytics::dataframe_to_json_value;
 use mdanalytics::json_to_dataframe;
-use mdcore::{AssetClass, AssetRequest, Ohlcv};
+use mdcore::{AssetClass, AssetRequest, MarketMetadata, Ohlcv};
+use mdwstrading::data::indicators::TickerStats;
 use polars::prelude::*;
 use redis::AsyncCommands;
 use serde_json::Value;
@@ -245,20 +246,26 @@ pub async fn fetch_ohlcv(
     let start_date = payload.datefrom.format("%Y-%m-%d").to_string();
     let end_date = payload.dateto.format("%Y-%m-%d").to_string();
 
+    payload
+        .validate_freq()
+        .map_err(|e| ApiError::BadRequest(e))?;
+
     let url = match payload.assetclass {
         AssetClass::Forex => format!(
-            "https://api.tiingo.com/tiingo/fx/{}/prices?startDate={}&endDate={}&resampleFreq=12hour&token={}",
-            ticker, start_date, end_date, state.tiingo_api_key
+            "https://api.tiingo.com/tiingo/fx/{}/prices?startDate={}&endDate={}&resampleFreq={}&token={}",
+            ticker, start_date, end_date, payload.frequency, state.tiingo_api_key
         ),
         AssetClass::Equity => format!(
-            "https://api.tiingo.com/tiingo/iex/{}/prices?startDate={}&endDate={}&resampleFreq=12hour&token={}",
-            ticker, start_date, end_date, state.tiingo_api_key
+            "https://api.tiingo.com/tiingo/daily/{}/prices?startDate={}&endDate={}&resampleFreq={}&token={}",
+            ticker, start_date, end_date, payload.frequency, state.tiingo_api_key
         ),
         AssetClass::Crypto => format!(
-            "https://api.tiingo.com/tiingo/crypto/prices?tickers={}&startDate={}&endDate={}&resampleFreq=12hour&token={}",
-            ticker, start_date, end_date, state.tiingo_api_key
+            "https://api.tiingo.com/tiingo/crypto/prices?tickers={}&startDate={}&endDate={}&resampleFreq={}&token={}",
+            ticker, start_date, end_date, payload.frequency, state.tiingo_api_key
         ),
     };
+
+    info!("Fetching OHLCV from Tiingo URL: {}", url);
 
     let response = state
         .request
@@ -290,4 +297,20 @@ pub async fn fetch_ohlcv(
     };
 
     Ok(Json(ohlcv_data))
+}
+
+pub async fn generate_stats(
+    State(state): State<WebAppState>,
+    Json(payload): Json<AssetRequest>,
+) -> Result<Json<TickerStats>, ApiError> {
+    let ohlcv_result = fetch_ohlcv(State(state.clone()), Json(payload.clone())).await?;
+    let data = ohlcv_result.0;
+    let meta = MarketMetadata {
+        frequency: payload.frequency,
+        asset_class: payload.assetclass,
+    };
+    let stats = TickerStats::calculate(&payload.ticker, meta, &data).ok_or_else(|| {
+        ApiError::BadRequest("Failed to calculate stats: insufficient data".to_string())
+    })?;
+    Ok(Json(stats))
 }

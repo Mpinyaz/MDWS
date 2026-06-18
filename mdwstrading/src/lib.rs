@@ -1,4 +1,5 @@
 pub mod data;
+pub mod execution;
 pub mod portfolio;
 pub mod risk;
 pub mod strategy;
