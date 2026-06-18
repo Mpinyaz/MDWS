@@ -15,8 +15,6 @@ pub fn get_annualization_factor(freq: Frequency) -> f64 {
                 StdFrequency::Min15 => 24.0 * 4.0,
                 StdFrequency::Min5 => 24.0 * 12.0,
                 StdFrequency::Minute => 24.0 * 60.0,
-                StdFrequency::Sec5 => 24.0 * 60.0 * 12.0,
-                StdFrequency::Second => 24.0 * 3600.0,
             };
             365.0 * periods_per_day
         }
@@ -311,16 +309,17 @@ impl ReturnStats {
         if ohlcv.len() < 2 {
             return None;
         }
+        //------------------------------------------------------------------//
+        //                           Log returns                            //
+        let mut returns: Vec<f64> = ohlcv
+            .windows(2)
+            .filter_map(|w| {
+                let prev = w[0].close.to_f64()?;
+                let curr = w[1].close.to_f64()?;
 
-        let mut returns = Vec::with_capacity(ohlcv.len() - 1);
-        for i in 1..ohlcv.len() {
-            if let (Some(prev), Some(curr)) = (ohlcv[i - 1].close.to_f64(), ohlcv[i].close.to_f64())
-            {
-                if prev > 0.0 && curr > 0.0 {
-                    returns.push((curr / prev).ln());
-                }
-            }
-        }
+                (prev > 0.0 && curr > 0.0).then(|| (curr / prev).ln())
+            })
+            .collect();
 
         if returns.is_empty() {
             return None;
@@ -574,7 +573,7 @@ mod tests {
 
         let meta = MarketMetadata {
             asset_class: AssetClass::Crypto,
-            frequency: Frequency::Std(StdFrequency::Second),
+            frequency: Frequency::Std(StdFrequency::Minute),
         };
         let stats = TickerStats::calculate("TEST", meta, &ohlcv).unwrap();
         assert_eq!(stats.descriptive.symbol, "TEST");
