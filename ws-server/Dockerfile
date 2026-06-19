@@ -1,18 +1,16 @@
-FROM golang:1.25-alpine AS build
+FROM golang:latest AS build
 
 WORKDIR /app
 
 # Copy dependency files first
 COPY go.mod go.sum ./
-ENV GODEBUG=netdns=go+force_ipv4
-RUN go clean -modcache
-RUN go mod download
+RUN CGO_ENABLED=0 go mod download
 
 # Now copy full source
 COPY . .
 
 # Build binary
-RUN go build -o mdws cmd/main.go
+RUN CGO_ENABLED=0 go build -o mdws cmd/main.go
 
 # Production stage
 FROM alpine:latest

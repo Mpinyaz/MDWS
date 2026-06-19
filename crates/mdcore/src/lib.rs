@@ -116,10 +116,19 @@ impl fmt::Display for EquityFrequency {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Frequency {
     Equity(EquityFrequency),
     Std(StdFrequency),
+}
+
+impl Serialize for Frequency {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
 }
 
 impl fmt::Display for Frequency {

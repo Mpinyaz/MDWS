@@ -1,4 +1,4 @@
-FROM rust:slim-bullseye AS build
+FROM rust:1.96-slim-bullseye AS build
 WORKDIR /app
 
 # Install required system dependencies
@@ -8,13 +8,17 @@ RUN apt-get update && apt-get install -y libssl-dev pkg-config libfontconfig1-de
 COPY . .
 
 # Build mdanalytics
-WORKDIR /app/mdanalytics
-RUN cargo build --release
+WORKDIR /app/crates/mdanalytics
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release && \
+    cp /app/target/release/server /app/server && \
+    cp /app/target/release/tui /app/tui
 
 # Production stage
 FROM debian:bullseye-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/mdanalytics/target/release/server .
-COPY --from=build /app/mdanalytics/target/release/tui .
+COPY --from=build /app/server .
+COPY --from=build /app/tui .
 CMD ["./server"]

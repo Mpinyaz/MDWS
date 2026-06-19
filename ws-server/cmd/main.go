@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	. "websockets/internal/core"
+	core "websockets/internal/core"
 	"websockets/internal/store/cache"
 	"websockets/utils"
 )
@@ -32,13 +32,13 @@ func main() {
 		clientStore = cache.NewClientStore(redisStore)
 	}
 
-	manager := NewManager(cfg, clientStore)
+	manager := core.NewManager(cfg, clientStore)
 	go manager.Run()
 
 	// ------------------------------------------------------------
 	// RabbitMQ Streams (market updates + subs)
 	// ------------------------------------------------------------
-	if err := InitMktStreams(manager); err != nil {
+	if err := core.InitMktStreams(manager); err != nil {
 		log.Fatalf("Failed to initialize RabbitMQ streams: %v", err)
 	}
 	log.Println("RabbitMQ market streams connected")
@@ -47,10 +47,10 @@ func main() {
 	// HTTP
 	// ------------------------------------------------------------
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ServeWS(manager, w, r)
+		core.ServeWS(manager, w, r)
 	})
 
-	http.HandleFunc("/health", HealthCheckHandler(manager))
+	http.HandleFunc("/health", core.HealthCheckHandler(manager))
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
