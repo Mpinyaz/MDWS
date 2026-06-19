@@ -9,7 +9,8 @@ count.txt
 .tanstack
 .wrangler
 market_data_ws_architecture.md
-target
+target/
+bin/
 ws-server/mdws
 /mdanalytics/target
 *.pem

@@ -18,7 +18,7 @@ services:
   mdwsworkers:
     build:
       context: .
-      dockerfile: mdworkers/Dockerfile
+      dockerfile: crates/mdworkers/Dockerfile
     container_name: mdws_workers
     env_file:
       - .env
@@ -51,7 +51,7 @@ services:
   mdanalytics:
     build:
       context: .
-      dockerfile: mdanalytics/Dockerfile
+      dockerfile: crates/mdanalytics/Dockerfile
     container_name: mdws_analytics
     env_file:
       - .env
@@ -72,7 +72,7 @@ services:
   mdwstrading:
     build:
       context: .
-      dockerfile: mdwstrading/Dockerfile
+      dockerfile: crates/mdtrading/Dockerfile
     container_name: mdws_trading
     env_file:
       - .env

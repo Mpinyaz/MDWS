@@ -1,6 +1,6 @@
 use mdcore::{AssetClass, AssetRequest, Ohlcv};
 use mdcore::{Frequency, MarketMetadata};
-use mdwstrading::data::indicators::{IndicatorConfig, IndicatorsEngine, ReturnStats};
+use mdtrading::data::indicators::{IndicatorConfig, IndicatorsEngine, ReturnStats};
 use reqwest::Client;
 
 #[tokio::main]

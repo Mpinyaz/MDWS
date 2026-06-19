@@ -10,7 +10,7 @@ use influxdb::ReadQuery;
 use mdanalytics::dataframe_to_json_value;
 use mdanalytics::json_to_dataframe;
 use mdcore::{AssetClass, AssetRequest, MarketMetadata, Ohlcv};
-use mdwstrading::data::indicators::TickerStats;
+use mdtrading::data::indicators::TickerStats;
 use polars::prelude::*;
 use redis::AsyncCommands;
 use serde_json::Value;
