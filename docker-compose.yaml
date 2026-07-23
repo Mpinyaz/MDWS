@@ -69,7 +69,7 @@ services:
     networks:
       - app-network
 
-  mdwstrading:
+  mdtrading:
     build:
       context: .
       dockerfile: crates/mdtrading/Dockerfile
@@ -167,8 +167,6 @@ services:
     restart: unless-stopped
     networks:
       - app-network
-
-
 
 secrets:
   influxdb2-admin-username:

@@ -246,9 +246,7 @@ pub async fn fetch_ohlcv(
     let start_date = payload.datefrom.format("%Y-%m-%d").to_string();
     let end_date = payload.dateto.format("%Y-%m-%d").to_string();
 
-    payload
-        .validate_freq()
-        .map_err(|e| ApiError::BadRequest(e))?;
+    payload.validate_freq().map_err(ApiError::BadRequest)?;
 
     let url = match payload.assetclass {
         AssetClass::Forex => format!(
